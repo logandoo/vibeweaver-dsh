@@ -1,0 +1,6 @@
+{
+  "id": "t03_fix_bug",
+  "type": "modify-existing",
+  "prompt": "在 /tmp/vwbench/t03 有一个加法函数的 bug：add(0.1, 0.2) 返回 0.30000000000000004 而不是 0.3。修复它并写一个测试证明修复有效（提示：考虑浮点舍入与整数处理）。",
+  "checker": "checks: add(0.1,0.2)===0.3 in test"
+}

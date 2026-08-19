@@ -1,0 +1,22 @@
+{
+  "name": "dsh-vibeweaver-baseline",
+  "description": "Arm-A bench 基线包：全量 vibeweaver SKILL.md 静态注入系统提示词（强制注入对照）",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "files": [
+    "lib/index.js",
+    "cordis.patch.yml"
+  ],
+  "license": "MIT"
+}

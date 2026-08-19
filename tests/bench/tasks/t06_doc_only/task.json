@@ -1,0 +1,6 @@
+{
+  "id": "t06_doc_only",
+  "type": "doc-only",
+  "prompt": "在 /tmp/vwbench/t06 写一个 README.md，介绍一个虚构项目 'blue-sky' 的用途（一句话即可）。不需要代码。",
+  "checker": "checks: README.md exists mentioning blue-sky"
+}

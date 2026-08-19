@@ -1,0 +1,6 @@
+{
+  "id": "t08_backend_refactor",
+  "type": "modify-existing-refactor",
+  "prompt": "在 /tmp/vwbench/t08 有一个 Node 模块计算器 calc.js（含 add/sub），现新增需求：支持 mul。保持现有 API 风格，写测试覆盖 add/sub/mul 三个函数。",
+  "checker": "checks: mul exists, all 3 functions tested & passing"
+}

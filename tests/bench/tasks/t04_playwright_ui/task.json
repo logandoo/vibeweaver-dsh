@@ -1,0 +1,6 @@
+{
+  "id": "t04_playwright_ui",
+  "type": "ui-flow",
+  "prompt": "在 /tmp/vwbench/t04 创建一个最小 HTML 页面（登录表单：用户名/密码/按钮，点击后显示 '欢迎'）。写一个 Playwright 脚本访问 file:// 页面、填入表单、点击按钮、截图保存为 screenshot.png，并验证欢迎文本出现。",
+  "checker": "checks: screenshot.png exists >0 bytes, welcome text appears"
+}

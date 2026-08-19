@@ -1,0 +1,6 @@
+{
+  "id": "t07_trivial_tweak",
+  "type": "modify-existing-trivial",
+  "prompt": "在 /tmp/vwbench/t07 的 config.json 里把 port 从 1234 改为 5678（一行改动）。",
+  "checker": "checks: config.json port==5678"
+}

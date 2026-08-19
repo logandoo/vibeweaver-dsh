@@ -1,0 +1,12 @@
+# dsh-vibeweaver bundle patch: inserts the vibeweaver plugin with its config.
+# 上层 profile/home patch 可用同 id 覆盖 config（整条替换, 需复述保留字段）。
+# config 键为 camelCase（dsh 插件约定, 见 dsh-skill-filesystem Config）。
+- insert:
+    - id: vibeweaver
+      name: "dsh-vibeweaver"
+      config:
+        skillSourceDir: "~/.config/opencode/skills/vibeweaver"
+        steerBudget: 3
+        gateMode: "block"
+        preStepActivation: true
+        recoverAfterCompaction: true

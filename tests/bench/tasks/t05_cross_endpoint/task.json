@@ -1,0 +1,6 @@
+{
+  "id": "t05_cross_endpoint",
+  "type": "modify-existing-cross",
+  "prompt": "在 /tmp/vwbench/t05 有一个 TODO API（Node http，端口 8305）：GET /todos 返回列表，POST /todos 添加。新增功能：DELETE /todos/:id 删除一条，并写一个跨端点测试：POST 添加 → GET 确认 → DELETE → GET 确认空。",
+  "checker": "checks: full POST→GET→DELETE→GET flow passes"
+}

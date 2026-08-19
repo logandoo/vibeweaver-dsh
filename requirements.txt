@@ -1,0 +1,2 @@
+# Python 依赖（bench 评分脚本 + assert_artifacts.py 均用标准库，无第三方依赖）
+# tomllib 需要 Python 3.11+；如系统 Python < 3.11，请安装 python3.11+

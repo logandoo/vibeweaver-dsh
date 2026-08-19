@@ -1,0 +1,4 @@
+# dsh-vibeweaver-baseline bundle patch: 静态全文注入基线插件
+- insert:
+    - id: vibeweaver-baseline
+      name: "dsh-vibeweaver-baseline"

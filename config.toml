@@ -1,0 +1,21 @@
+# vibeweaver-dsh 项目配置（A3：所有配置从这里读取，禁止硬编码）
+
+[plugin]
+# vibeweaver 技能正源目录（skill provider 的数据源；模型经 skill 工具按需加载）
+skill_source_dir = "~/.config/opencode/skills/vibeweaver"
+# 回合守卫每回合最大 steer 次数（防死循环）
+steer_budget = 3
+# 门禁模式: block(默认,证据缺失错误化) | warn(仅警告) | off(禁用)
+gate_mode = "block"
+# 预步激活注入开关（true=编码任务自动注入激活卡）
+pre_step_activation = true
+# 压缩(compaction)后重注入重建卡
+recover_after_compaction = true
+
+[bench]
+# A/B 评测配置
+headless_profiles = ["vibe-arm-a", "vibe-arm-b"]
+task_dir = "tests/bench/tasks"
+repeats = 1
+model_timeout_seconds = 900
+session_root = "~/.dsh/sessions"

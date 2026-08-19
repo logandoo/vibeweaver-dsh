@@ -1,0 +1,6 @@
+{
+  "id": "t01_scaffold_cli",
+  "type": "new-project",
+  "prompt": "在 /tmp/vwbench/t01 创建一个最小 Node.js CLI 项目：一个 script 能打印 'hello vwbench'，用 node:test 写一个单元测试并运行通过。项目里要有 README.md。",
+  "checker": "checks: [file exists /tmp/vwbench/t01/script.js or similar, test log shows pass, README.md exists]"
+}

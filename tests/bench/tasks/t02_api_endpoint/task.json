@@ -1,0 +1,6 @@
+{
+  "id": "t02_api_endpoint",
+  "type": "new-project-backend",
+  "prompt": "在 /tmp/vwbench/t02 用 Node 内置 http 模块写一个最小 API 服务：GET /health 返回 {status:'ok'}，监听 8302 端口，从 config.json 读取端口。写一个基于 fetch 的测试验证 /health 返回 200 与正确 JSON。",
+  "checker": "checks: server responds 200 on /health with {status:'ok'}, port read from config.json"
+}
