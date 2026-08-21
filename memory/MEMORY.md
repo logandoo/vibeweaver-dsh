@@ -12,6 +12,7 @@
 ## Project Context
 - [dsh 0.1.0-rc.6 环境](project_dsh_env.md) — npx 缓存真源；web profile 常驻；skills 全局目录；bundle 挂载先例 @dsh-whale/maid
 - [插件目标与验收](project_plugin_goal.md) — 效果 ≥ 强制注入；完成后按 dsh 官网审核插件
+- [主线 opencode 审计插件 08-21 修复](project_opencode_twin_20260821.md) — 会话级 RED 锁存 + 留痕释放；本仓库是其死锁受害者；dsh 无状态门架构不受影响
 
 ## External References
 - [dsh 官方参考](reference_dsh_docs.md) — reference/ 各子系统页 URL；本机 lib/types 真源路径

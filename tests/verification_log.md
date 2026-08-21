@@ -73,3 +73,11 @@
 - iter 1 PASS: 旧 web 进程（58218/58204）PID 精确停止；npm exec rc.6 后台重启（用户授权）| evidence: ps 无残留 + nohup 日志
 - iter 2 FAIL: 首次重启误拉 rc.7 | diagnosis: npm exec 无 --package pin 时取最新版 | changed: 重启命令显式 --package=@deepseek-ai/dsh@0.1.0-rc.6
 - iter 3 PASS: web 以 rc.6 重启成功（evidence: ~/.dsh/web.log "dsh web: http://127.0.0.1:3080"；curl 200；进程 2396 健康；日志 0 error；bundles 含 dsh-vibeweaver）| 3/3
+
+## Task: 2026-08-21 主线审计死锁修复 — dsh 仓库审计轨迹交付 + 兄弟插件等价记录（零代码改动）
+
+- iter 1 PASS: COV-9 基线 — 既有 runner `bash script/linux/project_build.sh` exit 0（src 3 文件 node --check 全过）+ `node --test tests/unit/*.test.js` 31/31（evidence: tests/baseline-build.log, tests/baseline-test.log）| coverage: 插件构建全量 + 31 个单测逐条
+- Baseline verified GREEN — proceed
+- iter 2 PASS: 审计轨迹交付 — 08-20 最新 `tests/gate_audit.md`（当时 BLOCKING=yes, BAD=7/UNCERTAIN=7，正是 opencode 主线审计死锁事件现场）进入 git 并推送；对应 `.vibeweaver/audit-state.json` 已在线迁移释放（by=manual-heal-20260821, reason=stale-session, from=unknown，redReleases 留痕）| evidence: tests/gate_audit.md 首行 AUDIT + redReleases 条目
+- iter 3 PASS: 等价核查 4 项 — ① dsh `tests/assert_artifacts.py` 与主线 08-21 canonical 逐字节相同（`diff` exit 0，含 13 组 + claim-lint）；② `lib/` == `src/`（build 后 `diff -q` 静默，3/3）；③ dsh 门为无状态即时 assert（block 仅结果反馈、写必然落盘 → 无跨会话锁存，主线的 latch 缺陷类不适用）；④ skill provider 正源 `~/.config/opencode/skills/vibeweaver` 已于 08-21 完成 17/17 payload 字节同步 → dsh 会话拉取的 vibeweaver 即最新 814 行版 | coverage: 4/4 项逐一 `diff`/`grep` 实测
+- delivery: 零代码改动波（本波 `git diff --stat` 全部为 tests/ + memory/ 类证据与记忆文件）→ A4.9 未触发，Code review: N/A（依据见 gate line）
