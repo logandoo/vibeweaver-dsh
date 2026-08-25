@@ -1,6 +1,6 @@
 # vibeweaver-dsh
 
-**vibeweaver 技能的 DeepSeek Harness (dsh) 专属版本** — 将 [vibeweaver](https://github.com/anomalyco/opencode) 工程纪律封装为 DeepSeek Harness 0.1.0-rc.6 插件 bundle，使 vibeweaver 工作流可以在 dsh 生态中完整运行。
+**vibeweaver 技能的 DeepSeek Harness (dsh) 专属版本** — 将 [vibeweaver](https://github.com/logandoo/vibeweaver) 工程纪律封装为 DeepSeek Harness 0.1.0-rc.6 插件 bundle，使 vibeweaver 工作流可以在 dsh 生态中完整运行。
 
 > 本仓库是 vibeweaver 的 dsh harness 专属发行版：原技能面向 opencode，本版本面向 DeepSeek Harness（jsonrpc-agent / headless CLI），非通用替代品。
 
