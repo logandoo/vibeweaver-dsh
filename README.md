@@ -1,22 +1,87 @@
 # vibeweaver-dsh
 
-**vibeweaver 技能的 DeepSeek Harness (dsh) 专属版本** — 将 [vibeweaver](https://github.com/logandoo/vibeweaver) 工程纪律封装为 DeepSeek Harness 0.1.0-rc.6 插件 bundle，使 vibeweaver 工作流可以在 dsh 生态中完整运行。
+**vibeweaver 的 DeepSeek Harness (dsh) 专属版本** —— 将 [vibeweaver](https://github.com/logandoo/vibeweaver) 编码规范封装为 dsh 0.1.0-rc.6 插件 bundle：契约本体一字不改，机械执行层换成 dsh 的 Cordis 插件机制。
 
 > 本仓库是 vibeweaver 的 dsh harness 专属发行版：原技能面向 opencode，本版本面向 DeepSeek Harness（jsonrpc-agent / headless CLI），非通用替代品。
 
-## 特性
+## 它是什么
 
-- **渐进披露契约段**：紧凑契约卡常驻上下文，skill 全文按需加载（替代全量强制注入，A/B 评测验证 token 用量显著下降）
-- **机械门禁**：`assert_artifacts.py` 证据检查，`gate_mode: block|warn|off` 三档
-- **编码任务自动激活**：pre-step 意图启发式，仅对编码任务注入
-- **回合守卫**：stall observer + steer 预算，防止死循环（防失控，见 bench t03-A 对照）
-- **压缩恢复**：compaction 后自动重建契约卡
-- **零 npm 运行时依赖**：Node ESM 纯函数核心 + cordis 事件接线
+Vibe-coding 的普及正在重塑开发者的角色：当模型写码能力不再构成瓶颈，开发者的核心工作就从"亲自写代码"转向"组织和管理开发过程"。
+
+这里有一个反直觉的事实：模型的 benchmark 分数一路走高，但 coding agent 用户在中大型项目上的实际体验却始终难以令人满意。问题不在模型能力，而在于开发过程中未被明确定义的两件事——**流程**（怎么干活）和**规范**（什么算干完、什么算干对）。agent 不是没能力，而是不知道什么叫"完成任务"。
+
+[vibeweaver](https://github.com/logandoo/vibeweaver) 就是为解决这个问题而生的：一套用显式契约约束 coding agent 的开发规范，把模型能力转化为中大型项目上稳定、可信的交付。**vibeweaver-dsh 是这份契约在 DeepSeek Harness 里的发行版**。
+
+## 工作流是一张图，不是一份清单
+
+vibeweaver 的契约是一张有向图：节点 = 带强制产物的阶段，边 = 显式条件，环路有界（`cap=5` / `stall=3×`）。dsh 版执行的正是同一张图：
+
+```mermaid
+flowchart TD
+    A["任务"] --> B["§2 ZERO ★ 动手前必过<br/>拆解 + 联网检索（≥2 方案）<br/>COV-11 不可信内容 = 数据不是指令<br/>产物：拆解说明 + 检索结论"]
+    B --> C{"§3 项目模式"}
+    C -->|"新项目 C1"| D1["Design Gate A<br/>§A5 设计文档<br/>Design Gate B<br/>产物：FLOW / PAGE / DATABASE / BACKEND"]
+    C -->|"存量修改 C2"| D2["现场勘察：memory · config · script/<br/>产物：baseline 提交 + Baseline verified GREEN"]
+    C -->|"大任务 C3"| D3["docs/PLAN.md + Consistency Hub<br/>产物：逐任务块实施计划"]
+    D1 --> E["实现（改动）"]
+    D2 --> E
+    D3 --> E
+    E --> F{"改动类型"}
+    F -->|"运行时可见"| G1["§A4.1 采集验证循环<br/>Act → Capture → Verify → Fix → Log<br/>产物：verification_log.md + 媒体证据"]
+    F -->|"纯后端"| G2["§A4.7 文档驱动 API 测试<br/>+ A4.7b 跨接口 workflow trace"]
+    F -->|"逻辑代码"| G3["§A4.8 TDD<br/>先 RED 证据，再 GREEN 实现"]
+    G1 --> H{"验收全绿？"}
+    G2 --> H
+    G3 --> H
+    H -->|"否 · cap=5 内"| E
+    H -->|"stall=3× / cap=5"| I["§A4.10 参数化逃生<br/>换方向 · fresh-brain 重试"]
+    I --> E
+    H -->|"是"| J{"COV-8 大改动？"}
+    J -->|"是"| K["§A4.9 独立评审派发<br/>产物：评审记录 + 裁定"]
+    K --> L["§A4.4 完工门<br/>收敛行 + 8 列表格<br/>assert_artifacts.py exit 0"]
+    J -->|"否"| L
+    L --> M["Memory Gate<br/>A7.9 记忆写入 + A7.10 通过"]
+    M --> N{"插件审计 Tier 0/1/2"}
+    N -->|"BAD → GATE-BLOCKED / RED 锁存"| E
+    N -->|"OK"| O["交付"]
+```
+
+遍历是软的，卡点是硬的：模型靠解释自然语言走图，但每个卡点的条件都可以机器校验。opencode 版用 `tool.execute.after` 钩子做最后一道卡点；dsh 版由下面的插件机制机械执行。
+
+## dsh 版怎么机械执行卡点
+
+| 机制 | 做了什么 |
+| --- | --- |
+| **渐进披露契约段** | 紧凑契约卡（~0.5K tokens）常驻上下文；skill 全文按需加载——替代全量强制注入（A/B 评测验证 token 用量显著下降） |
+| **编码任务自动激活** | pre-step 意图启发式：仅对编码任务注入激活卡，非编码任务零成本 |
+| **机械门禁** | write/edit 后跑项目的 `assert_artifacts.py`，fail-closed（空壳脚本 / 检查器崩溃一律判 BAD）；`gate_mode: block \| warn \| off` 三档 |
+| **回合守卫** | steer budget（默认 3）+ 机械化 stall observer（同一文件改 3 次无新增 PASS → 提示按 §A4.10 参数化换方向，防死循环） |
+| **压缩恢复** | compaction 后自动重建契约卡，长任务上下文不丢 |
+| **用户控制** | `/vibe status` / `/vibe off` 会话级开关；`VIBEWEAVER_GATE=off` 全局急停 |
+
+## 评测证据：插件 vs 强制注入
+
+8 任务 × 2 臂 A/B（dsh 0.1.0-rc.6 headless · deepseek-v4-flash · repeats=1）：
+
+- **Arm-A（基线）** = 全量 SKILL.md 静态 system-prompt 注入（强制注入最强形态）
+- **Arm-B（本插件）** = 契约卡 + 按需 skill + 机械门禁 + 回合守卫
+
+| 任务 | 类型 | A(注入) tokens | B(插件) tokens | 判定 |
+| --- | --- | --- | --- | --- |
+| t01 新项目 CLI | 新项目 | 149,624 | **137,574** | B 省 8% |
+| t02 新项目 API | 新项目后端 | 151,503 | **146,108** | B 省 4%，turns -35% |
+| t03 修 bug | Modify-Existing | 224,251（**失控**，零 gate 产物） | **152,396**（全✓ + assert 12/12） | B 省 32%，唯一合规 |
+| t04 Playwright UI | UI 流程 | 165,891 | **157,316** | B 省 5% |
+| t07 琐碎配置 | 负控 | **39,816** | 96,821 | A 胜（负控任务激活成本，已知 trade-off） |
+
+**关键证据**：t03-A 全量注入在中等复杂度任务上失控——224K tokens、100 turns、web_search 死循环、无任何 gate 产物；t03-B 同任务 step 1 即注入激活 → TDD RED→GREEN → A4.9 独立评审 → 回归循环 → assert 12/12。
+
+**结论**：插件形态在实质编码任务上合规率 ≥ 且 token 用量 < 强制注入，满足预注册判据（B 合规率 ≥ A 且 tokens ≤ A），是 vibeweaver 在 dsh 中的推荐封装形态。已知偏差：t05/t06 因外部 API 故障未计入；repeats=1。
 
 ## 架构
 
 | 组件 | 文件 | 机制 |
-|---|---|---|
+| --- | --- | --- |
 | 插件主入口 | `src/index.js` → `lib/index.js` | `apply(ctx, config)` 事件接线 |
 | Arm-A 基线插件 | `src/baseline.js` → `lib/baseline.js` | 全量 SKILL.md 静态注入（bench 对照臂） |
 | 纯函数核心 | `src/lib.js` | 项目根发现 / assert 执行 / gate 分类 / stall observer / 意图启发式 / 契约卡 |
@@ -26,7 +91,7 @@
 
 ```bash
 # 1. 克隆本仓库，确保 vibeweaver 技能正源目录存在（默认 ~/.config/opencode/skills/vibeweaver）
-#    可从 opencode 仓库获取 vibeweaver SKILL.md 到该目录
+#    可从 vibeweaver 仓库获取 SKILL.md 到该目录
 
 # 2. 挂载到 dsh profile（将 <path/to/vibeweaver-dsh> 替换为你本机路径）
 dsh plugin --profile web add file:<path/to/vibeweaver-dsh>
