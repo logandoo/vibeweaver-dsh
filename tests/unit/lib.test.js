@@ -164,6 +164,14 @@ test("covenantCard: 含核心 gate token 且长度 < 8KB", () => {
   assert.ok(card.length < 8000, `card too large: ${card.length}`)
 })
 
+test("covenantCard: COV-5 引用视觉探针（probeScript 优先，默认回退正源目录）", () => {
+  const bundled = covenantCard({ skillSourceDir: "/tmp/skills", probeScript: "/opt/dsh-vibeweaver/scripts/mm_probe.py" })
+  assert.ok(bundled.includes("/opt/dsh-vibeweaver/scripts/mm_probe.py --generate"))
+  assert.ok(!bundled.includes("/tmp/skills/scripts/mm_probe.py"))
+  const fallback = covenantCard({ skillSourceDir: "/tmp/skills" })
+  assert.ok(fallback.includes("/tmp/skills/scripts/mm_probe.py --generate"))
+})
+
 test("inlineCheck: assert 脚本缺失时做内联证据检查", () => {
   const root = makeProject()
   const failures = inlineCheck(root)

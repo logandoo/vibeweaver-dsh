@@ -225,6 +225,7 @@ export function isCodingIntent(text) {
 
 export function covenantCard(cfg) {
   const src = cfg?.skillSourceDir || "~/.config/opencode/skills/vibeweaver"
+  const probe = cfg?.probeScript || `${src}/scripts/mm_probe.py`
   return [
     "# vibeweaver 契约（本会话生效）",
     "",
@@ -234,7 +235,7 @@ export function covenantCard(cfg) {
     "- COV-2 SCRIPT-ONLY: 前端构建与服务启停一律走 script/linux/*.sh；禁用 raw `npm run build`/`vite`/`npm start`/`uvicorn`。",
     "- COV-3 ZERO FIRST: 写码前先分解问题、web 搜索（exa/Context7）、评估 ≥2 方案再决定。",
     "- COV-4 SELF-STARTING 验证循环: 运行时行为变化 → 自动 Act→Capture→Verify→Fix→Log，不等用户提示。",
-    `- COV-5 验证器宣布: 会话开始先跑行为探针 python3 ${src}/scripts/mm_probe.py --generate → Read tests/probe_vision.png（报告 token+颜色）→ --check。PASS → Verifier: model-native [image]（截图自读，但必须按 §A4.1.1 协议：观察前置·逐标准引证·DOM 交叉核验·UNCERTAIN=FAIL）；FAIL 且装有 mm-sensor → Verifier: mm-sensor [mode]（vision.py --detail high 评分，此模式禁自读）；都无 → direct read（以 DOM/日志核验为主）。`,
+    `- COV-5 验证器宣布: 会话开始先跑行为探针 python3 ${probe} --generate → Read tests/probe_vision.png（报告 token+颜色）→ --check。PASS → Verifier: model-native [image]（截图自读，但必须按 §A4.1.1 协议：观察前置·逐标准引证·DOM 交叉核验·UNCERTAIN=FAIL）；FAIL 且装有 mm-sensor → Verifier: mm-sensor [mode]（vision.py --detail high 评分，此模式禁自读）；都无 → direct read（以 DOM/日志核验为主）。`,
     "- COV-6 backend-only → API 文档驱动测试循环（httpx/requests）。",
     "- COV-7 循环边界: iteration cap=5 per sub-problem, stall=3× 同判据连败（acceptance.md 首行 `> cap=5  stall=3×`）。",
     "- 完成行必须含字面 token: `HARD-GATE-1: NO-TEST-NO-DONE=pass` 与 `HARD-GATE-2: SCRIPT-ONLY=pass`（见 [Verification Gate] 行格式）。",

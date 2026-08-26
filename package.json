@@ -18,7 +18,8 @@
   "files": [
     "lib/index.js",
     "lib/baseline.js",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "scripts/mm_probe.py"
   ],
   "license": "MIT"
 }
