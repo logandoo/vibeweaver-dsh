@@ -5,3 +5,13 @@ __pycache__/
 .pid
 *.log
 .vibeweaver/
+
+# runtime / work-state artifacts (not source)
+memory/
+tests/verification_log.md
+tests/gate_audit.md
+tests/acceptance.md
+tests/review/
+tests/bench/report.md
+tests/bench/bench_results.csv
+tests/bench/final_scores.json
