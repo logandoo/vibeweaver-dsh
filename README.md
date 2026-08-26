@@ -53,6 +53,7 @@ flowchart TD
 | 机制 | 做了什么 |
 | --- | --- |
 | **渐进披露契约段** | 紧凑契约卡（~0.5K tokens）常驻上下文；skill 全文按需加载——替代全量强制注入（A/B 评测验证 token 用量显著下降） |
+| **验证器三段树（COV-5）** | 与主线同步：契约卡内置自多模态行为探针（`mm_probe.py`）——PASS → `model-native [image]`（§A4.1.1 协议自读）；FAIL + mm-sensor → `mm-sensor [mode]`（独立打分）；都没有 → `direct read`（DOM/日志核验） |
 | **编码任务自动激活** | pre-step 意图启发式：仅对编码任务注入激活卡，非编码任务零成本 |
 | **机械门禁** | write/edit 后跑项目的 `assert_artifacts.py`，fail-closed（空壳脚本 / 检查器崩溃一律判 BAD）；`gate_mode: block \| warn \| off` 三档 |
 | **回合守卫** | steer budget（默认 3）+ 机械化 stall observer（同一文件改 3 次无新增 PASS → 提示按 §A4.10 参数化换方向，防死循环） |

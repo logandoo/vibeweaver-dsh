@@ -53,6 +53,7 @@ Traversal is soft, gating is hard: the model walks the graph by interpreting pro
 | Mechanism | What it does |
 | --- | --- |
 | **Progressive-disclosure covenant** | A compact covenant card (~0.5K tokens) stays resident in context; the full skill text loads on demand — replacing full-force injection (A/B benchmarks show a significant token reduction) |
+| **Three-stage verifier tree (COV-5)** | In sync with the mainline: the covenant card carries the self-multimodality behavioral probe (`mm_probe.py`) — PASS → `model-native [image]` (self-read under the §A4.1.1 protocol); FAIL + mm-sensor → `mm-sensor [mode]` (independent grading); neither → `direct read` (DOM/log inspection) |
 | **Auto-activation for coding tasks** | pre-step intent heuristics: the activation card is injected only for coding work; non-coding tasks cost nothing |
 | **Mechanical gate** | Runs the project's `assert_artifacts.py` after every write/edit, fail-closed (shell scripts / crashed checkers always grade BAD); `gate_mode: block \| warn \| off` |
 | **Turn guard** | steer budget (default 3) + mechanized stall observer (same file edited 3× with no new PASS → nudges toward §A4.10 parameterized direction change, preventing infinite loops) |
