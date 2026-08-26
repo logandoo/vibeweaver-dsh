@@ -53,7 +53,7 @@ flowchart TD
 | 机制 | 做了什么 |
 | --- | --- |
 | **渐进披露契约段** | 紧凑契约卡（~0.5K tokens）常驻上下文；skill 全文按需加载——替代全量强制注入（A/B 评测验证 token 用量显著下降） |
-| **验证器三段树（COV-5）** | 与主线同步：契约卡内置自多模态行为探针（`mm_probe.py`）——PASS → `model-native [image]`（§A4.1.1 协议自读）；FAIL + mm-sensor → `mm-sensor [mode]`（独立打分）；都没有 → `direct read`（DOM/日志核验） |
+| **验证器三段树（COV-5）** | 与主线同步：探针 `scripts/mm_probe.py` **随插件捆绑**（与 vibeweaver 字节一致），契约卡优先用自带副本、缺失时回退正源目录——PASS → `model-native [image]`（§A4.1.1 协议自读）；FAIL + mm-sensor → `mm-sensor [mode]`（独立打分）；都没有 → `direct read`（DOM/日志核验） |
 | **编码任务自动激活** | pre-step 意图启发式：仅对编码任务注入激活卡，非编码任务零成本 |
 | **机械门禁** | write/edit 后跑项目的 `assert_artifacts.py`，fail-closed（空壳脚本 / 检查器崩溃一律判 BAD）；`gate_mode: block \| warn \| off` 三档 |
 | **回合守卫** | steer budget（默认 3）+ 机械化 stall observer（同一文件改 3 次无新增 PASS → 提示按 §A4.10 参数化换方向，防死循环） |
@@ -86,6 +86,7 @@ flowchart TD
 | 插件主入口 | `src/index.js` → `lib/index.js` | `apply(ctx, config)` 事件接线 |
 | Arm-A 基线插件 | `src/baseline.js` → `lib/baseline.js` | 全量 SKILL.md 静态注入（bench 对照臂） |
 | 纯函数核心 | `src/lib.js` | 项目根发现 / assert 执行 / gate 分类 / stall observer / 意图启发式 / 契约卡 |
+| 视觉探针 | `scripts/mm_probe.py` | 自多模态行为探针（与 vibeweaver 字节一致，随插件捆绑；缺失回退正源目录） |
 | bundle 挂载 | `package.json` + `cordis.patch.yml` | `dsh.bundle.patch` → `insert: [{id, name}]` |
 
 ## 安装
