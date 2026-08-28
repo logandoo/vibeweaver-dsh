@@ -109,6 +109,40 @@ test("classifyMessages: BLOCKING_HINTS 分类", () => {
   assert.ok(warnings.some((m) => m.includes("git repo")))
 })
 
+test("classifyMessages: 组 14-16 内容门禁消息一律 blocking（2026-08-28 移植）", () => {
+  const lines = [
+    '- secret scan: app/config.py:1: credential-looking string on an added line — \'token = "x"\' (A4.4 content gate)',
+    "- test-change guard: tests/test_math.py: 1 assertion line(s) removed without a `- test-change:` justification in verification_log.md (A4.8 test integrity)",
+    "- risk-tier: change-wave touches risk-tier path(s) (auth/login.py) but tests/review_package.md missing/empty — A4.9 review non-skippable (A4.9)",
+  ]
+  const { blocking, warnings } = classifyMessages(lines)
+  assert.ok(blocking.some((m) => m.includes("secret scan")), "secret scan must block")
+  assert.ok(blocking.some((m) => m.includes("test-change")), "test-change must block")
+  assert.ok(blocking.some((m) => m.includes("risk-tier")), "risk-tier must block")
+  assert.equal(warnings.length, 0)
+})
+
+test("covenantCard: 含 14-16 内容门禁 token（2026-08-28 移植）", () => {
+  const card = covenantCard({ skillSourceDir: "/tmp/skills" })
+  assert.ok(card.includes("secret scan"))
+  assert.ok(card.includes("test-change"))
+  assert.ok(card.includes("risk-tier"))
+})
+
+test("checkGate: 波次 diff 新增凭据 → blocking 含 secret scan（16 组 canonical）", () => {
+  const root = makeFullProject()
+  execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "backup: before changes"], { cwd: root })
+  writeFileSync(join(root, "app-config.js"),
+    'const token = "' + "ghp_" + "a1B2c3D4" + "e5F6g7H8" + '"\n')
+  execFileSync("git", ["add", "-A"], { cwd: root })
+  execFileSync("git", ["commit", "-q", "-m", "add config"], { cwd: root })
+  const result = checkGate(root)
+  assert.ok(result, "gate must not pass a committed secret in the wave diff")
+  assert.ok(result.blocking.some((m) => m.includes("secret scan")),
+    `expected secret scan in blocking, got: ${JSON.stringify(result)}`)
+  rmSync(root, { recursive: true, force: true })
+})
+
 test("blockMessage: 包含 GATE-BLOCKED 前缀与 blocking 明细", () => {
   const msg = blockMessage("/tmp/root", { blocking: ["- x"], warnings: [] })
   assert.ok(msg.includes("GATE-BLOCKED"))

@@ -50,12 +50,23 @@ flowchart TD
 
 ## dsh 版怎么机械执行卡点
 
+## 2026-08-28：主线 AI-native SDLC 加固移植
+
+对照主线 2026-08-28 波次（[vibeweaver@6567e51](https://github.com/logandoo/vibeweaver)）：完工门从"证据在不在"升级到"diff 内容是什么"。本波次把同套规则移植进 dsh 插件（本仓库不做 A/B——主线已完成 deepseek-v4-flash 强制注入修改前后 A/B：15/16 → 16/16，遵循度 6/10 → 9/10）：
+
+- **门禁分类同步**：`BLOCKING_HINTS` 增加 `secret scan` / `test-change` / `risk-tier`——assert 组 14-16 的失败消息在 dsh 门禁一律 blocking（此前组 14/16 会落入 warnings 放行）。组 14 secret scan（per-commit 波次 diff + 未跟踪文件整扫，AKIA/私钥块/`ghp_`/`github_pat_`/`sk-proj-`/`sk-ant-`/JSON 形态 k=v；`os.environ`/`process.env`/`config.x`/`self.x` 引用值豁免，`.md` 仅 WARN）；组 15 test-change guard（删断言行须日志理由，含整文件删除）；组 16 risk-tier（高风险代码路径强制 `tests/review_package.md`）。
+- **契约卡同步**：COV-8 扩写（risk-tier 不可跳过 + 评审发现 Bugs/Security/Compliance 打标 + Minor ≤5 逐条）+ 内容门禁一行 + agent-config 回归一行（改 `CLAUDE.md`/`.claude/**`/skill 规则文件后必重跑验证套件）。卡片仍 < 8KB。
+- **夹具先行**：3 个新单测先 RED（分类/卡片/门禁集成——含真实 git 夹具提交凭据被拦），修复后全套 35/35 GREEN；本仓库根 `assert_artifacts.py` 同步刷新为 16 组 canonical。
+- 主线侧的 §A4.4.3 Artifact Chain、§A9 事故复盘模板、跨项目 ⛔ 提升、生产部署人工确认等纯文档规则由 dsh 契约卡"完整规则按需加载"路径经 skill 正源自然继承（正源已同步），插件无需另码。
+
+
 | 机制 | 做了什么 |
 | --- | --- |
 | **渐进披露契约段** | 紧凑契约卡（~0.5K tokens）常驻上下文；skill 全文按需加载——替代全量强制注入（A/B 评测验证 token 用量显著下降） |
 | **验证器三段树（COV-5）** | 与主线同步：探针 `scripts/mm_probe.py` **随插件捆绑**（与 vibeweaver 字节一致），契约卡优先用自带副本、缺失时回退正源目录——PASS → `model-native [image]`（§A4.1.1 协议自读）；FAIL + mm-sensor → `mm-sensor [mode]`（独立打分）；都没有 → `direct read`（DOM/日志核验） |
 | **编码任务自动激活** | pre-step 意图启发式：仅对编码任务注入激活卡，非编码任务零成本 |
 | **机械门禁** | write/edit 后跑项目的 `assert_artifacts.py`，fail-closed（空壳脚本 / 检查器崩溃一律判 BAD）；`gate_mode: block \| warn \| off` 三档 |
+| **内容门禁（2026-08-28 主线同步）** | assert 组 14-16 的失败消息（`secret scan` / `test-change` / `risk-tier`）在 dsh 侧一律归类为 blocking：波次 diff 增行含凭据即拦（安全引用值豁免）、删测试断言无 `- test-change:` 理由即拦、触及 auth/payment/migration 等高风险路径无 `tests/review_package.md` 即拦 |
 | **回合守卫** | steer budget（默认 3）+ 机械化 stall observer（同一文件改 3 次无新增 PASS → 提示按 §A4.10 参数化换方向，防死循环） |
 | **压缩恢复** | compaction 后自动重建契约卡，长任务上下文不丢 |
 | **用户控制** | `/vibe status` / `/vibe off` 会话级开关；`VIBEWEAVER_GATE=off` 全局急停 |
