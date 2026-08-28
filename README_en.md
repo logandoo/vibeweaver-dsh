@@ -50,14 +50,7 @@ Traversal is soft, gating is hard: the model walks the graph by interpreting pro
 
 ## How the dsh edition enforces the gates mechanically
 
-## 2026-08-28: mainline AI-native SDLC hardening port
 
-Mirrors the mainline 2026-08-28 wave ([vibeweaver@6567e51](https://github.com/logandoo/vibeweaver)): the completion gate moves from "does evidence exist" to "what does the diff contain". This wave ports the same rules into the dsh plugin (no A/B here — the mainline already ran the deepseek-v4-flash forced-injection before/after benchmark: 15/16 → 16/16, artifact adherence 6/10 → 9/10):
-
-- **Gate classification sync**: `BLOCKING_HINTS` gains `secret scan` / `test-change` / `risk-tier` — group 14-16 failure messages now block in the dsh gate (groups 14/16 previously fell through as warnings). Group 14 `secret scan` (per-commit wave diff + untracked-file sweep; AKIA / private-key blocks / `ghp_`/`github_pat_`/`sk-proj-`/`sk-ant-` / JSON-form k=v; `os.environ`/`process.env`/`config.x`/`self.x` reference values exempt, `.md` warn-only); group 15 `test-change guard` (removed assertion lines require a logged reason, whole-file deletion included); group 16 `risk-tier` (high-risk code paths require `tests/review_package.md`).
-- **Covenant card sync**: COV-8 extended (risk-tier non-skippable + findings tagged `Bugs`/`Security`/`Compliance` + Minor cap 5 itemized) + a content-gates line + an agent-config regression line (editing `CLAUDE.md`/`.claude/**`/skill rule files requires re-running the verification suite). Card stays < 8KB.
-- **Fixture-first**: 3 new unit tests went RED first (classification / card / gate integration — a real git fixture committing a credential gets blocked), then the full suite went GREEN at 35/35; this repo's own root `assert_artifacts.py` refreshed to the 16-group canonical.
-- Pure-documentation rules on the mainline side (§A4.4.3 Artifact Chain, §A9 incident postmortem, cross-project ⛔ promotion, production-deploy human-confirm) are inherited through the card's "load the full rules from the skill source" path (source already synced) — no plugin code needed.
 
 
 | Mechanism | What it does |
@@ -66,10 +59,19 @@ Mirrors the mainline 2026-08-28 wave ([vibeweaver@6567e51](https://github.com/lo
 | **Three-stage verifier tree (COV-5)** | In sync with the mainline: the probe `scripts/mm_probe.py` is **bundled with the plugin** (byte-identical to vibeweaver); the covenant card prefers the bundled copy and falls back to the skill source dir — PASS → `model-native [image]` (self-read under the §A4.1.1 protocol); FAIL + mm-sensor → `mm-sensor [mode]` (independent grading); neither → `direct read` (DOM/log inspection) |
 | **Auto-activation for coding tasks** | pre-step intent heuristics: the activation card is injected only for coding work; non-coding tasks cost nothing |
 | **Mechanical gate** | Runs the project's `assert_artifacts.py` after every write/edit, fail-closed (shell scripts / crashed checkers always grade BAD); `gate_mode: block \| warn \| off` |
-| **Content gates (2026-08-28 mainline sync)** | Group 14-16 failure messages (`secret scan` / `test-change` / `risk-tier`) are always classified blocking on the dsh side: a credential on an added wave-diff line blocks (safe reference values exempt), a removed test assertion without a `- test-change:` log reason blocks, and touching high-risk paths (auth/payment/migration/…) without `tests/review_package.md` blocks |
+| **Content gates (2026-08-28 mainline sync)** | Group 14-16 failure messages (`secret scan` / `test-change` / `risk-tier`) are always classified blocking on the dsh side: a credential on an added wave-diff line blocks (unquoted safe reference values exempt), a removed test assertion without a `- test-change:` log reason blocks, and touching high-risk paths (auth/payment/migration/…) without `tests/review_package.md` blocks |
 | **Turn guard** | steer budget (default 3) + mechanized stall observer (same file edited 3× with no new PASS → nudges toward §A4.10 parameterized direction change, preventing infinite loops) |
 | **Compaction recovery** | The covenant card is rebuilt automatically after compaction, so long-task context survives |
 | **User control** | `/vibe status` / `/vibe off` per-session switch; `VIBEWEAVER_GATE=off` global kill-switch |
+
+## 2026-08-28: mainline AI-native SDLC hardening port
+
+Mirrors the mainline 2026-08-28 wave ([vibeweaver@6567e51](https://github.com/logandoo/vibeweaver)): the completion gate moves from "does evidence exist" to "what does the diff contain". This wave ports the same rules into the dsh plugin (no A/B here — the mainline already ran the deepseek-v4-flash forced-injection before/after benchmark: 15/16 → 16/16, artifact adherence 6/10 → 9/10):
+
+- **Gate classification sync**: `BLOCKING_HINTS` gains `secret scan` / `test-change` / `risk-tier` — group 14-16 failure messages now block in the dsh gate (groups 14/16 previously fell through as warnings). Group 14 `secret scan` (per-commit wave diff + untracked-file sweep; AKIA / private-key blocks / `ghp_`/`github_pat_`/`sk-proj-`/`sk-ant-` / JSON-form k=v; `os.environ`/`process.env`/`config.x`/`self.x` reference values exempt, `.md` warn-only); group 15 `test-change guard` (removed assertion lines require a logged reason, whole-file deletion included); group 16 `risk-tier` (high-risk code paths require `tests/review_package.md`).
+- **Covenant card sync**: COV-8 extended (risk-tier non-skippable + findings tagged `Bugs`/`Security`/`Compliance` + Minor cap 5 itemized) + a content-gates line + an agent-config regression line (editing `CLAUDE.md`/`.claude/**`/skill rule files requires re-running the verification suite). Card stays < 8KB.
+- **Fixture-first**: 3 new unit tests went RED first (classification / card / gate integration — a real git fixture committing a credential gets blocked), then the full suite went GREEN at 35/35; this repo's own root `assert_artifacts.py` refreshed to the 16-group canonical.
+- Pure-documentation rules on the mainline side (§A4.4.3 Artifact Chain, §A9 incident postmortem, cross-project ⛔ promotion, production-deploy human-confirm) are inherited through the card's "load the full rules from the skill source" path (source already synced) — no plugin code needed.
 
 ## The evidence: plugin vs force-injection
 
