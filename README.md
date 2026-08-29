@@ -73,14 +73,13 @@ flowchart TD
 | **压缩恢复** | compaction 后自动重建契约卡，长任务上下文不丢 |
 | **用户控制** | `/vibe status` / `/vibe off` 会话级开关；`VIBEWEAVER_GATE=off` 全局急停 |
 
-## 2026-08-29：主线 wave3 移植（双模式 + 任务类型扩展）
+## 2026-08-29：主线 wave3 移植（双模式 + 任务类型）
 
-对照主线 wave3（[vibeweaver@a01d413](https://github.com/logandoo/vibeweaver)，A/B 回归 4 轮均值 AFTER 92.5% vs BEFORE 87.5%，非劣 +2）：
+主线这波（[vibeweaver@a01d413](https://github.com/logandoo/vibeweaver)）治的是两个老毛病：agent 干着干着停下来等人敲"继续"，以及审计/部署/运维这类活根本没有工作流。复测 4 轮均值 92.5% vs 改前 87.5%，方向为正。dsh 侧跟着动了三处：
 
-- **契约卡新增 COV-12**：每任务声明 `Mode: AUTO`（默认，全程接管）或 `Mode: GUIDED`；AUTO 下主观确认点（需求模糊/验收标准/设计门/基线失败）→ ADR 追加至 `tests/decisions.md` 后自主继续，完工输出 `[Decisions]` 行；Class-E 硬停（COV-11 冲突·生产部署·破坏性操作·凭据暴露）两模式相同；暂停必带 `[PAUSED] … default-if-continue=…` 包（"继续"= 批准默认选项）。
-- **任务类型路由行**：审计 C4（只读，finding 必带证据）· 部署 C5（部署动作=Class-E，回滚先行）· 运维/事故 C6（先取证后动手）· 非Web运行时 C7（project profile + CLI transcript 证据）；全文走 skill 正源 `WORKFLOWS_EXTENDED.md`（渐进披露自然继承）。
-- **组 14 收紧同步**：`vw-approved` 标记仅在同行命中凭据模式时生效（纯提及 = no-op），且必须配对 `- secret-approved: <path> — <reason>` 日志行（按路径计数）；canonical assert 刷新（profile 支持：库/CLI 项目不再被 start.sh 死锁；bool/JSON 校验命名失败）。
-- 夹具：全单测 32/32 GREEN（lib 17 + index 15）；`tests/assert_artifacts.py` 同步为 17 标记 canonical。
+- 契约卡加了 COV-12：每个任务声明 AUTO（默认——该问的改写成 `tests/decisions.md` 里的一行 ADR，然后自己接着干）或 GUIDED。不可逆的事（生产部署、删数据、注入冲突）两个模式都照停，停必带 `[PAUSED] … default-if-continue=…`，"继续"就是批准默认项。卡现在 2.9KB，离 8KB 的线还远。
+- 卡里加了一行任务类型路由：审计 C4 / 部署 C5 / 运维 C6 / 非Web C7。全文照旧走 skill 正源的 `WORKFLOWS_EXTENDED.md`，插件不重复维护一份。
+- `tests/assert_artifacts.py` 刷成主线 canonical（17 标记）：库/CLI 项目可以声明 profile 跳过 start.sh 那组检查；`vw-approved` 豁免必须配 `- secret-approved: <路径>` 日志行，光在注释里提一句不算数。单测 32/32。
 
 ## 2026-08-28：主线 AI-native SDLC 加固移植
 
