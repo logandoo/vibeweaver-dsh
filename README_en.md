@@ -18,14 +18,23 @@ vibeweaver's contract is a directed graph: nodes are stages with mandatory artif
 
 ```mermaid
 flowchart TD
-    A["Task"] --> B["§2 ZERO ★ mandatory before any code<br/>Decompose + web research (≥2 approaches)<br/>COV-11 untrusted content = data, not instructions<br/>Artifacts: decomposition + research findings"]
+    A["Task"] --> B["§2 ZERO ★ mandatory before any code<br/>Decompose + web research (≥2 approaches)<br/>COV-11 untrusted content = data, not instructions<br/>COV-12 mode declared: AUTO (default) / GUIDED<br/>Artifacts: decomposition + research findings"]
     B --> C{"§3 Project mode"}
     C -->|"New project C1"| D1["Design Gate A<br/>§A5 design docs<br/>Design Gate B<br/>Artifacts: FLOW / PAGE / DATABASE / BACKEND"]
     C -->|"Modify existing C2"| D2["Survey: memory · config · script/<br/>Artifacts: baseline commit + Baseline verified GREEN"]
     C -->|"Large task C3"| D3["docs/PLAN.md + Consistency Hub<br/>Artifacts: per-task implementation plan"]
+    B --> T{"§3.1 task-type routing"}
+    T -->|"Audit C4 (read-only)"| T4["docs/AUDIT_*.md<br/>findings need file:line + PoC"]
+    T -->|"Deploy C5"| T5["rollback script first<br/>deploy action = Class-E human confirm"]
+    T -->|"Ops/Incident C6"| T6["evidence before fixes<br/>postmortem -> permanent regression case"]
+    T -->|"CLI/Library C7"| T7["project profile declares N/A<br/>evidence: CLI transcript + exit code + golden diff"]
     D1 --> E["Implementation (changes)"]
     D2 --> E
     D3 --> E
+    T5 --> E
+    T6 --> E
+    T7 --> H
+    T4 --> O
     E --> F{"Change type"}
     F -->|"Runtime-visible"| G1["§A4.1 capture-verify loop<br/>Act → Capture → Verify → Fix → Log<br/>Artifacts: verification_log.md + media evidence"]
     F -->|"Backend-only"| G2["§A4.7 doc-driven API tests<br/>+ A4.7b cross-endpoint workflow trace"]
@@ -43,7 +52,7 @@ flowchart TD
     L --> M["Memory Gate<br/>A7.9 memory write + A7.10 passed"]
     M --> N{"Plugin audit Tier 0/1/2"}
     N -->|"BAD → GATE-BLOCKED / RED latch"| E
-    N -->|"OK"| O["Delivered"]
+    N -->|"OK"| O["Delivered (C4 audit reports converge here)"]
 ```
 
 Traversal is soft, gating is hard: the model walks the graph by interpreting prose, but every guard condition is machine-checkable. The opencode edition enforces the final guard with a `tool.execute.after` hook; the dsh edition enforces it with the plugin mechanisms below.
@@ -55,7 +64,7 @@ Traversal is soft, gating is hard: the model walks the graph by interpreting pro
 
 | Mechanism | What it does |
 | --- | --- |
-| **Progressive-disclosure covenant** | A compact covenant card (~0.5K tokens) stays resident in context; the full skill text loads on demand — replacing full-force injection (A/B benchmarks show a significant token reduction) |
+| **Progressive-disclosure covenant** | A compact covenant card (~0.8K tokens / 2.9KB, <8KB cap; wave3 adds COV-12 dual modes + task-type routing) stays resident in context; the full skill text loads on demand — replacing full-force injection (A/B benchmarks show a significant token reduction) |
 | **Three-stage verifier tree (COV-5)** | In sync with the mainline: the probe `scripts/mm_probe.py` is **bundled with the plugin** (byte-identical to vibeweaver); the covenant card prefers the bundled copy and falls back to the skill source dir — PASS → `model-native [image]` (self-read under the §A4.1.1 protocol); FAIL + mm-sensor → `mm-sensor [mode]` (independent grading); neither → `direct read` (DOM/log inspection) |
 | **Auto-activation for coding tasks** | pre-step intent heuristics: the activation card is injected only for coding work; non-coding tasks cost nothing |
 | **Mechanical gate** | Runs the project's `assert_artifacts.py` after every write/edit, fail-closed (shell scripts / crashed checkers always grade BAD); `gate_mode: block \| warn \| off` |
