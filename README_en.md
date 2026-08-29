@@ -64,6 +64,15 @@ Traversal is soft, gating is hard: the model walks the graph by interpreting pro
 | **Compaction recovery** | The covenant card is rebuilt automatically after compaction, so long-task context survives |
 | **User control** | `/vibe status` / `/vibe off` per-session switch; `VIBEWEAVER_GATE=off` global kill-switch |
 
+## 2026-08-29: mainline wave3 port (dual modes + task-type expansion)
+
+Mirrors mainline wave3 ([vibeweaver@a01d413](https://github.com/logandoo/vibeweaver); A/B regression 4-round average AFTER 92.5% vs BEFORE 87.5%, non-inferior +2):
+
+- **Contract card adds COV-12**: every task declares `Mode: AUTO` (default, full takeover) or `Mode: GUIDED`; in AUTO, subjective confirmation points (ambiguity / acceptance criteria / design gate / baseline failures) become ADRs appended to `tests/decisions.md` and the agent proceeds; Class-E hard stops (COV-11 conflict · production deploy · destructive ops · credential exposure) apply in BOTH modes; every pause carries a `[PAUSED] … default-if-continue=…` packet ("continue" = approve the default, not a re-plan).
+- **Task-type routing line**: audit C4 (read-only, findings need evidence) · deploy C5 (deploy action = Class-E, rollback first) · ops/incident C6 (evidence before fixes) · non-web runtime C7 (project profile + CLI-transcript evidence); full text via the skill source `WORKFLOWS_EXTENDED.md` (progressive disclosure).
+- **Group-14 tightening sync**: a `vw-approved` marker only counts when the line ALSO matches a credential pattern (prose mentions are no-ops) and requires the path-scoped `- secret-approved: <path> — <reason>` log pairing; canonical assert refreshed (profiles: library/CLI projects no longer deadlock on start.sh; bool/JSON validation fails named).
+- Fixtures: all unit tests 32/32 GREEN (lib 17 + index 15); `tests/assert_artifacts.py` synced to the 17-marker canonical.
+
 ## 2026-08-28: mainline AI-native SDLC hardening port
 
 Mirrors the mainline 2026-08-28 wave ([vibeweaver@6567e51](https://github.com/logandoo/vibeweaver)): the completion gate moves from "does evidence exist" to "what does the diff contain". This wave ports the same rules into the dsh plugin (no A/B here — the mainline already ran the deepseek-v4-flash forced-injection before/after benchmark: 15/16 → 16/16, artifact adherence 6/10 → 9/10):

@@ -64,6 +64,15 @@ flowchart TD
 | **压缩恢复** | compaction 后自动重建契约卡，长任务上下文不丢 |
 | **用户控制** | `/vibe status` / `/vibe off` 会话级开关；`VIBEWEAVER_GATE=off` 全局急停 |
 
+## 2026-08-29：主线 wave3 移植（双模式 + 任务类型扩展）
+
+对照主线 wave3（[vibeweaver@a01d413](https://github.com/logandoo/vibeweaver)，A/B 回归 4 轮均值 AFTER 92.5% vs BEFORE 87.5%，非劣 +2）：
+
+- **契约卡新增 COV-12**：每任务声明 `Mode: AUTO`（默认，全程接管）或 `Mode: GUIDED`；AUTO 下主观确认点（需求模糊/验收标准/设计门/基线失败）→ ADR 追加至 `tests/decisions.md` 后自主继续，完工输出 `[Decisions]` 行；Class-E 硬停（COV-11 冲突·生产部署·破坏性操作·凭据暴露）两模式相同；暂停必带 `[PAUSED] … default-if-continue=…` 包（"继续"= 批准默认选项）。
+- **任务类型路由行**：审计 C4（只读，finding 必带证据）· 部署 C5（部署动作=Class-E，回滚先行）· 运维/事故 C6（先取证后动手）· 非Web运行时 C7（project profile + CLI transcript 证据）；全文走 skill 正源 `WORKFLOWS_EXTENDED.md`（渐进披露自然继承）。
+- **组 14 收紧同步**：`vw-approved` 标记仅在同行命中凭据模式时生效（纯提及 = no-op），且必须配对 `- secret-approved: <path> — <reason>` 日志行（按路径计数）；canonical assert 刷新（profile 支持：库/CLI 项目不再被 start.sh 死锁；bool/JSON 校验命名失败）。
+- 夹具：全单测 32/32 GREEN（lib 17 + index 15）；`tests/assert_artifacts.py` 同步为 17 标记 canonical。
+
 ## 2026-08-28：主线 AI-native SDLC 加固移植
 
 对照主线 2026-08-28 波次（[vibeweaver@6567e51](https://github.com/logandoo/vibeweaver)）：完工门从"证据在不在"升级到"diff 内容是什么"。本波次把同套规则移植进 dsh 插件（本仓库不做 A/B——主线已完成 deepseek-v4-flash 强制注入修改前后 A/B：15/16 → 16/16，遵循度 6/10 → 9/10）：
