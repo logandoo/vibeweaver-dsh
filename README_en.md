@@ -73,6 +73,14 @@ Traversal is soft, gating is hard: the model walks the graph by interpreting pro
 | **Compaction recovery** | The covenant card is rebuilt automatically after compaction, so long-task context survives |
 | **User control** | `/vibe status` / `/vibe off` per-session switch; `VIBEWEAVER_GATE=off` global kill-switch |
 
+## 2026-08-30: mainline wave4 port (five contracts borrowed from mattpocock/skills)
+
+The mainline wave ([vibeweaver@0d6da0e](https://github.com/logandoo/vibeweaver)) did a read-only comparison against mattpocock/skills and adopted five: C3 test seams, the A4.9 spec-fidelity triad, the Fowler twelve-smell reviewer baseline, GUIDED frontier rounds, and the proactive-ADR three-criteria test. Four more were evaluated and rejected on the record (issue-tracker publishing, pathless specs, dual-axis parallel reviewers, CONTEXT.md glossaries). Two things moved on the dsh side:
+
+- The covenant card's COV-8 line gained two short clauses: Compliance must report the spec-fidelity triad (missing/partial · scope creep · looks-implemented-but-wrong, quoting the criterion line), and the review package carries the Fowler smell baseline (repo standards override; every smell a judgement call).
+- The covenant card's COV-12 pause protocol gained one sentence: in GUIDED, a multi-question pause runs as dependency-ordered rounds (each question with a recommended answer, blocked questions wait for the next round, facts are looked up not asked, empty frontier = nothing silently assumed).
+- C3 test seams and the ADR criteria have no card section to anchor to (the card doesn't carry C3/ADR detail); full text still loads from the skill source, no duplicate maintenance. Unit tests 35/35.
+
 ## 2026-08-29: mainline wave3 port (dual modes + task types)
 
 The mainline wave ([vibeweaver@a01d413](https://github.com/logandoo/vibeweaver)) tackles two recurring annoyances: the agent stopping mid-task to wait for a human "continue", and audit/deploy/ops work having no workflow at all. Four-round re-run average: 92.5% vs 87.5% before — direction positive. Three things moved on the dsh side:

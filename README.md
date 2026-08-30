@@ -73,6 +73,14 @@ flowchart TD
 | **压缩恢复** | compaction 后自动重建契约卡，长任务上下文不丢 |
 | **用户控制** | `/vibe status` / `/vibe off` 会话级开关；`VIBEWEAVER_GATE=off` 全局急停 |
 
+## 2026-08-30：主线 wave4 移植（mattpocock/skills 五项契约增量）
+
+主线这波（[vibeweaver@0d6da0e](https://github.com/logandoo/vibeweaver)）对 mattpocock/skills 做只读对照评估后落地五条：C3 测试缝、A4.9 spec 保真三元组、Fowler 十二味评审基线、GUIDED 分轮访谈、proactive ADR 三判据；另四条（issue-tracker 发布、无路径 spec、双轴并行 reviewer、CONTEXT.md 词汇表）在案拒绝。dsh 侧跟动两处：
+
+- 契约卡 COV-8 行补两短句：Compliance 必报 spec 保真三元组（missing/partial · scope creep · 看似实现实则错误，逐条引用判据原文）；评审包附 Fowler smell 基线（repo 标准覆盖、均为 judgement call）。
+- 契约卡 COV-12 暂停协议补一句：GUIDED 多问题暂停按依赖分轮（每题带推荐答案、被未决答案阻塞的留到后轮、事实自查只问决策、frontier 空=无静默假设）。
+- C3 测试缝与 ADR 三判据在卡里无对应段落（卡不含 C3/ADR 细节层），全文照旧走 skill 正源，不重复维护。单测 35/35。
+
 ## 2026-08-29：主线 wave3 移植（双模式 + 任务类型）
 
 主线这波（[vibeweaver@a01d413](https://github.com/logandoo/vibeweaver)）治的是两个老毛病：agent 干着干着停下来等人敲"继续"，以及审计/部署/运维这类活根本没有工作流。复测 4 轮均值 92.5% vs 改前 87.5%，方向为正。dsh 侧跟着动了三处：
