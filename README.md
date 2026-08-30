@@ -73,6 +73,10 @@ flowchart TD
 | **压缩恢复** | compaction 后自动重建契约卡，长任务上下文不丢 |
 | **用户控制** | `/vibe status` / `/vibe off` 会话级开关；`VIBEWEAVER_GATE=off` 全局急停 |
 
+## 2026-08-30：主线 wave5 移植（spike 路由 + 任务切分测试）
+
+主线这波（[vibeweaver@e751ada](https://github.com/logandoo/vibeweaver)）对照 obra/superpowers 全仓库后落地两条：§3.1 新增 S1 spike 路由（可行性问题的交付物是答案不是代码，产出标记 throwaway，要留=新请求重新过基线）、C3 计划增任务切分测试（reviewer 能否否决本任务而通过邻任务）；另八条在案拒绝。dsh 侧跟动一处：契约卡任务类型路由行末尾补 spike 支（探针计划 2-3 句、最便宜求证、代码 throwaway、要留=新请求）。任务切分测试属 C3 计划细节层，卡里无锚点，全文照旧走 skill 正源。单测 35/35。
+
 ## 2026-08-30：主线 wave4 移植（mattpocock/skills 五项契约增量）
 
 主线这波（[vibeweaver@0d6da0e](https://github.com/logandoo/vibeweaver)）对 mattpocock/skills 做只读对照评估后落地五条：C3 测试缝、A4.9 spec 保真三元组、Fowler 十二味评审基线、GUIDED 分轮访谈、proactive ADR 三判据；另四条（issue-tracker 发布、无路径 spec、双轴并行 reviewer、CONTEXT.md 词汇表）在案拒绝。dsh 侧跟动两处：
