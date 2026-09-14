@@ -73,6 +73,10 @@ Traversal is soft, gating is hard: the model walks the graph by interpreting pro
 | **Compaction recovery** | The covenant card is rebuilt automatically after compaction, so long-task context survives |
 | **User control** | `/vibe status` / `/vibe off` per-session switch; `VIBEWEAVER_GATE=off` global kill-switch |
 
+## 2026-09-14: mainline wave7 port (trusted oracle + checker contract)
+
+Mirrors the mainline [wave7](https://github.com/logandoo/vibeweaver) (the fifteen-arm result: a deterministic loop only pays when it is fed a trusted oracle — real tests 4/4, self-written tests 1/4, generated tests 1/4 with false greens). The covenant card's COV-1 line gains the trusted-oracle clause: only project/external tests (or executable acceptance criteria) certify a task; generated tests must pass qualification (stub fails, gold passes, plausible-wrong fails) and remain weak evidence; self-written tests are weakest; an invisible contract is flagged, never invented; a project checker (`vw_check.py` / `script/check.sh`) is the loop's feedback. No A/B here (the mainline ran it: ds 16 tasks 13/16 → 16/16; qwen 8-task subset 4/8 → 3/8). Wave 6 carried no contract delta (covenant text unchanged). Unit suite 35/35.
+
 ## 2026-08-30: mainline wave5 port (spike routing + task right-sizing)
 
 The mainline wave ([vibeweaver@e751ada](https://github.com/logandoo/vibeweaver)) compared against the full obra/superpowers repo and adopted two: a new S1 spike route in §3.1 (a feasibility question delivers an answer, not code; output stays throwaway; keeping it = a new request with its own baseline) and a task right-sizing test for C3 plans (split only where a reviewer could reject one task while approving its neighbor). Eight more were rejected on the record. One thing moved on the dsh side: the covenant card's task-routing line gains the spike branch (2-3 sentence probe plan, cheapest correct probe, throwaway code, keeping = new request). The right-sizing test is C3 plan-layer detail with no card anchor; full text stays with the skill source. Unit tests 35/35.

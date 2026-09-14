@@ -73,6 +73,10 @@ flowchart TD
 | **压缩恢复** | compaction 后自动重建契约卡，长任务上下文不丢 |
 | **用户控制** | `/vibe status` / `/vibe off` 会话级开关；`VIBEWEAVER_GATE=off` 全局急停 |
 
+## 2026-09-14：主线 wave7 移植（受信 oracle + checker 契约）
+
+对照主线 [wave7](https://github.com/logandoo/vibeweaver)（15 臂实验结论：确定性循环只有在喂入受信 oracle 时才有收益——真测试 4/4，自写测试 1/4，生成测试 1/4 且出现假绿）：契约卡 COV-1 行追加「受信 oracle」条款——只有项目/外部测试（或可执行验收标准）能认证；生成测试须过资格验证（stub 挂 / gold 过 / 错误解挂）且属弱证据，自写测试最弱；契约不可见标记为待确认、不发明接口；项目 checker（`vw_check.py` / `script/check.sh`）即循环反馈源。本仓库不做 A/B（主线已完成：ds 16 题 13/16→16/16、qwen 8 题子集 4/8→3/8）。wave6 无契约增量（covenant 文本未变）。单元 35/35。
+
 ## 2026-08-30：主线 wave5 移植（spike 路由 + 任务切分测试）
 
 主线这波（[vibeweaver@e751ada](https://github.com/logandoo/vibeweaver)）对照 obra/superpowers 全仓库后落地两条：§3.1 新增 S1 spike 路由（可行性问题的交付物是答案不是代码，产出标记 throwaway，要留=新请求重新过基线）、C3 计划增任务切分测试（reviewer 能否否决本任务而通过邻任务）；另八条在案拒绝。dsh 侧跟动一处：契约卡任务类型路由行末尾补 spike 支（探针计划 2-3 句、最便宜求证、代码 throwaway、要留=新请求）。任务切分测试属 C3 计划细节层，卡里无锚点，全文照旧走 skill 正源。单测 35/35。
