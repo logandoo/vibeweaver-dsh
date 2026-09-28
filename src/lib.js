@@ -238,7 +238,7 @@ export function covenantCard(cfg) {
     "- COV-4 SELF-STARTING 验证循环: 运行时行为变化 → 自动 Act→Capture→Verify→Fix→Log，不等用户提示。",
     `- COV-5 验证器宣布: 会话开始先跑行为探针 python3 ${probe} --generate → Read tests/probe_vision.png（报告 token+颜色）→ --check。PASS → Verifier: model-native [image]（截图自读，但必须按 §A4.1.1 协议：观察前置·逐标准引证·DOM 交叉核验·UNCERTAIN=FAIL）；FAIL 且装有 mm-sensor → Verifier: mm-sensor [mode]（vision.py --detail high 评分，此模式禁自读）；都无 → direct read（以 DOM/日志核验为主）。`,
     "- COV-6 backend-only → API 文档驱动测试循环（httpx/requests）。",
-    "- COV-7 循环边界: iteration cap=5 per sub-problem, stall=3× 同判据连败（acceptance.md 首行 `> cap=5  stall=3×`）。",
+    "- COV-7 循环边界: iteration cap=5 per sub-problem, stall=3× 同判据连败（acceptance.md 首行 `> cap=5  stall=3×`）。另: ≥4 连续 no-op bash（echo/printf 字面旁白）= noop-bash stall——中断即 stall 声明，完成输出前须写 `- stall: noop-bash …` 入 verification_log；旁白≠执行，宣布的工具调用必须以真实工具调用发出。",
     "- 完成行必须含字面 token: `HARD-GATE-1: NO-TEST-NO-DONE=pass` 与 `HARD-GATE-2: SCRIPT-ONLY=pass`（见 [Verification Gate] 行格式）。",
     "- COV-8 大改动 → 独立评审（opencode task 子代理）——发现按 Bugs/Security/Compliance 打标、Minor ≤5 逐条；Compliance 必报 spec 保真三元组（需求 missing/partial · scope creep · 看似实现实则错误，逐条引用判据原文），评审包附 Fowler 十二味 smell 基线（repo 标准覆盖、均判 judgement call）；触及 auth/security/payment/billing/crypto/migration/permission/acl 代码路径时评审不可跳过（risk-tier，assert 组 16 机器检查 review_package.md）。",
     "- 完工门内容检查（assert 组 14-16，2026-08-28 主线同步；2026-08-29 wave3 收紧）: 波次 diff 增行不得含凭据（secret scan；未加引号的 os.environ/process.env/config.x/self.x 引用值豁免，.md 仅 WARN；用户明确要求的凭据用行内 `vw-approved` 标记豁免，但必须有配对的 `- secret-approved: <path> — <reason>` 日志行，且纯提及不算标记）；删测试断言须 `- test-change: <path> — <reason>` 日志理由（test-change guard，含整文件删除）。",
