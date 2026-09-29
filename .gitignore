@@ -11,6 +11,8 @@ memory/
 tests/verification_log.md
 tests/gate_audit.md
 tests/acceptance.md
+tests/decisions.md
+tests/fcv_report.md
 tests/review/
 tests/bench/report.md
 tests/bench/bench_results.csv

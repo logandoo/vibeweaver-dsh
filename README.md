@@ -64,14 +64,20 @@ flowchart TD
 
 | 机制 | 做了什么 |
 | --- | --- |
-| **渐进披露契约段** | 紧凑契约卡（~0.8K tokens / 2.9KB，<8KB 上限；wave3 含 COV-12 双模式与任务类型路由）常驻上下文；skill 全文按需加载——替代全量强制注入（A/B 评测验证 token 用量显著下降） |
+| **渐进披露契约段** | 紧凑契约卡（~2.1K tokens / 7.6KB，<8KB 上限；wave3 含 COV-12 双模式与任务类型路由，2026-09-30 含 COV-13 Class 声明与 §V11.9 渲染门）常驻上下文；skill 全文按需加载——替代全量强制注入（A/B 评测验证 token 用量显著下降） |
 | **验证器三段树（COV-5）** | 与主线同步：探针 `scripts/mm_probe.py` **随插件捆绑**（与 vibeweaver 字节一致），契约卡优先用自带副本、缺失时回退正源目录——PASS → `model-native [image]`（§A4.1.1 协议自读）；FAIL + mm-sensor → `mm-sensor [mode]`（独立打分）；都没有 → `direct read`（DOM/日志核验） |
 | **编码任务自动激活** | pre-step 意图启发式：仅对编码任务注入激活卡，非编码任务零成本 |
 | **机械门禁** | write/edit 后跑项目的 `assert_artifacts.py`，fail-closed（空壳脚本 / 检查器崩溃一律判 BAD）；`gate_mode: block \| warn \| off` 三档 |
-| **内容门禁（2026-08-28 主线同步）** | assert 组 14-16 的失败消息（`secret scan` / `test-change` / `risk-tier`）在 dsh 侧一律归类为 blocking：波次 diff 增行含凭据即拦（未加引号的安全引用值豁免）、删测试断言无 `- test-change:` 理由即拦、触及 auth/payment/migration 等高风险路径无 `tests/review_package.md` 即拦 |
+| **内容门禁（2026-08-28 主线同步；2026-09-30 扩至 18 组）** | assert 失败消息按证据语义归类 blocking：组 14-16（`secret scan` / `test-change` / `risk-tier`）+ 18 组新增（`DOC-asset render gate` / `exec-check`）+ 声明类证据缺失（`screenshot` / `media evidence`）+ §V11.7 `--class` 交叉校验（`contradicts the log`）——波次 diff 增行含凭据即拦（未加引号的安全引用值豁免）、删测试断言无 `- test-change:` 理由即拦、触及 auth/payment/migration 等高风险路径无 `tests/review_package.md` 即拦、office 资产无 `render:`/`exec-check:` 证据行即拦；Class 谎报由 assert `--class` 交叉校验与完工审计（C18）判 BAD（门禁路径自动识别 `- class:`，不判谎报） |
 | **回合守卫** | steer budget（默认 3）+ 机械化 stall observer（同一文件改 3 次无新增 PASS → 提示按 §A4.10 参数化换方向，防死循环） |
 | **压缩恢复** | compaction 后自动重建契约卡，长任务上下文不丢 |
 | **用户控制** | `/vibe status` / `/vibe off` 会话级开关；`VIBEWEAVER_GATE=off` 全局急停 |
+
+## 2026-09-30：双源更新（dsh 0.2.0-rc.2 兼容扫描 + 主线 COV-13/§V11.9 移植）
+
+**dsh 侧**：对 0.1.0-rc.6 → 0.2.0-rc.2 做 npm-pack 类型真源比对（沿用 08-29 扫描方法论）——插件用到的全部 API 形状（write/edit `file_path`、`PostToolDecision` accept/block、`agent/pre-step`/`turn-stopping`/`disposed`、`session/event`、`SkillProvider`、`systemPrompt.section`、`commands.register`）字节一致或仅附加字段；被移除的 `ctx.agent`/`agent/session-start`/`codeRuntime` 插件均未使用。**插件代码零更改**；升级 dsh 到 0.2.0-rc.2 对插件安全。watch 项：bench 的会话存储 v2→v3、`code`→`ptc` 改名、adapter 默认上报插件包名。
+
+**主线侧**：移植 wave12 之后的契约增量——契约卡新增 **COV-13 Class 声明**（`Class: CODE|CONFIG|DOC` 按 git diff --stat 文件种类、CODE>CONFIG>DOC 首中即定、只升不降；DOC=diff+回读/lite 3 列表、CONFIG=smoke+基线、CODE=全量；log 任务块首条 `- class:` 行、gate 行含 Class 字段）与 **§V11.9 DOC-asset 渲染门**（文件种类触发：NO RENDER, NO DONE、每资产 `render:` + `exec-check:` 证据行、`Doc-skill: readme|docx|xlsx|pptx|none` 声明）。门禁分类器同步主线 18 组 assert 新增失败消息（`DOC-asset render gate` / `exec-check`）、§V11.7 `--class` 交叉校验消息（`contradicts the log`）为 blocking，并补齐 `media evidence` 声明类 fail-open（ADR D-1，与 08-28 移植动机同型）。**评审 Critical 修复**：检查器崩溃识别补齐 `SyntaxError`/`IndentationError`/`ETIMEDOUT`（Python 语法崩溃此前落 warnings = fail-open），且检查器非零退出但无结构化 `- ` 失败行一律 fail-closed——"空壳/崩溃判 BAD" 承诺自此真实成立。根 `tests/assert_artifacts.py` 刷新 18 组 canonical（19 markers 自检）。激活/重建文本 COV-1..11 旧漂移修正为 COV-1..13。单元 43/43。
 
 ## 2026-09-14：主线 wave7 移植（受信 oracle + checker 契约）
 

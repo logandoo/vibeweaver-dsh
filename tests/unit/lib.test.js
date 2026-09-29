@@ -129,6 +129,97 @@ test("covenantCard: 含 14-16 内容门禁 token（2026-08-28 移植）", () => 
   assert.ok(card.includes("risk-tier"))
 })
 
+test("classifyMessages: 主线 18 组新增失败消息一律 blocking（2026-09-30 移植）", () => {
+  // 字面串取自主线 canonical assert（tests/assert_artifacts.py）check() 文本，防措辞漂移
+  const lines = [
+    "- §V11.9 DOC-asset render gate: report.docx delivered without bound render evidence — add `render: <asset> — <existing page images>` or `render: <asset> — N/A (<missing tool>)` to the log (NO RENDER, NO DONE)",
+    "- §V11.9 exec-check: report.docx delivered without a recorded executable-behavior check — add `exec-check: <asset> — clean` or `exec-check: <asset> — escalated → Class CODE` (vbaProject.bin / PDF JS / macro sheet)",
+    "--class DOC contradicts the log's `- class: CODE` in the current task block — one class per task (§V11.7)",
+  ]
+  const { blocking, warnings } = classifyMessages(lines)
+  assert.ok(blocking.some((m) => m.includes("DOC-asset render gate")), "render gate must block")
+  assert.ok(blocking.some((m) => m.includes("exec-check")), "exec-check must block")
+  assert.ok(blocking.some((m) => m.includes("contradicts the log")), "class misreport must block")
+  assert.equal(warnings.length, 0)
+  // 字面串必须仍存在于 canonical 脚本中（措辞变了 = 分类器与 assert 脱钩）
+  const canon = readFileSync(new URL("../../tests/assert_artifacts.py", import.meta.url), "utf8")
+  assert.ok(canon.includes("DOC-asset render gate"), "canonical assert must carry the render-gate message")
+  assert.ok(canon.includes("exec-check"), "canonical assert must carry the exec-check message")
+  assert.ok(canon.includes("contradicts the log"), "canonical assert must carry the class-contradiction message")
+  assert.ok(canon.includes("media evidence claimed"), "canonical assert must carry the media-evidence message")
+})
+
+test("classifyMessages: media evidence 声明缺失与 screenshot 同级 blocking（claim-class 补齐）", () => {
+  const { blocking, warnings } = classifyMessages([
+    "- media evidence claimed but missing/empty: tests/demo.webm (A4.1)",
+  ])
+  assert.ok(blocking.some((m) => m.includes("media evidence")), "media evidence must block")
+  assert.equal(warnings.length, 0)
+})
+
+test("covenantCard: 含 COV-13 Class 声明与 §V11.9 渲染门 token（2026-09-30 移植）", () => {
+  const card = covenantCard({ skillSourceDir: "/tmp/skills" })
+  assert.ok(card.includes("COV-13"))
+  assert.ok(/Class:\s*CODE\|CONFIG\|DOC/.test(card))
+  assert.ok(card.includes("Class: DOC|CONFIG|CODE") || /gate 行含 Class 字段/.test(card))
+  assert.ok(card.includes("NO RENDER"))
+  assert.ok(card.includes("Doc-skill"))
+  assert.ok(card.includes("docs-drift"))
+  assert.ok(card.includes("render:"))
+  assert.ok(card.includes("exec-check"), "§V11.9 line must carry the exec-check obligation")
+  assert.ok(Buffer.byteLength(card) < 8000, `card exceeds 8KB bytes: ${Buffer.byteLength(card)}`)
+})
+
+test("index.js 激活/重建文本覆盖 COV-1..13（2026-09-30 移植）", () => {
+  const src = readFileSync(new URL("../../src/index.js", import.meta.url), "utf8")
+  assert.ok(!src.includes("COV-1..11"), "stale COV-1..11 range must be gone")
+  assert.ok(src.includes("COV-1..13"), "activation/recover texts must span COV-1..13")
+  assert.ok(src.includes("Class: CODE|CONFIG|DOC"), "activation text must prompt the Class declaration")
+  // 发货件是 lib/index.js（package.json main）——lib 须与 src 同步
+  const libSrc = readFileSync(new URL("../../lib/index.js", import.meta.url), "utf8")
+  assert.equal(libSrc, src, "lib/index.js must mirror src/index.js (run bash script/linux/project_build.sh)")
+})
+
+test("runnerCrashed: Python SyntaxError/IndentationError/超时崩溃识别（I4 fail-closed）", () => {
+  assert.equal(runnerCrashed([{ flags: "", output: '  File "tests/assert_artifacts.py", line 3\nSyntaxError: invalid syntax' }]), true)
+  assert.equal(runnerCrashed([{ flags: "", output: "IndentationError: unexpected indent" }]), true)
+  assert.equal(runnerCrashed([{ flags: "", output: "exit ETIMEDOUT" }]), true)
+  assert.equal(runnerCrashed([{ flags: "", output: "- tests/verification_log.md missing (COV-1)" }]), false)
+})
+
+test("checkGate: assert 脚本语法崩溃 → fail-closed blocking（I4）", () => {
+  const root = makeFullProject()
+  writeFileSync(join(root, "tests", "assert_artifacts.py"),
+    readFileSync(CANON_ASSERT_PATH, "utf8") + "\nthis is not python syntax (((\n")
+  const gate = checkGate(root)
+  assert.ok(gate, "gate must produce a result")
+  assert.ok(gate.blocking.length > 0, `checker crash must block, got blocking=[] warnings=${JSON.stringify(gate.warnings)}`)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("checkGate: 检查器非零退出但无结构化 - 行 → fail-closed blocking（I4）", () => {
+  const root = makeFullProject()
+  writeFileSync(join(root, "tests", "assert_artifacts.py"),
+    "# verification_log acceptance cap=5 marker\nprint('checker exploded')\nraise SystemExit(1)\n")
+  const gate = checkGate(root)
+  assert.ok(gate, "gate must produce a result")
+  assert.ok(gate.blocking.length > 0, `unstructured checker failure must block, got blocking=[] warnings=${JSON.stringify(gate.warnings)}`)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("checkGate: office 资产无 render: 证据行 → blocking 含 render gate（§V11.9 集成）", () => {
+  const root = makeFullProject()
+  writeFileSync(join(root, "report.docx"), "innocuous placeholder content\n")
+  // 暂存交付（canonical 组 17 经 git diff --cached --name-status 识别；纯 untracked
+  // 被 canonical 的单列解析漏掉 —— 上游 known-gap，见 memory/known_gaps_upstream.md）
+  execFileSync("git", ["add", "report.docx"], { cwd: root })
+  const gate = checkGate(root)
+  assert.ok(gate, "gate must produce a result")
+  assert.ok(gate.blocking.some((m) => m.includes("DOC-asset render gate")),
+    `expected render-gate blocking, got ${JSON.stringify(gate)}`)
+  rmSync(root, { recursive: true, force: true })
+})
+
 test("checkGate: 波次 diff 新增凭据 → blocking 含 secret scan（16 组 canonical）", () => {
   const root = makeFullProject()
   execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "backup: before changes"], { cwd: root })
@@ -195,7 +286,7 @@ test("covenantCard: 含核心 gate token 且长度 < 8KB", () => {
   assert.ok(card.includes("cap=5  stall=3"))
   assert.ok(card.includes("tests/acceptance.md"))
   assert.ok(card.includes("vibeweaver_gate"))
-  assert.ok(card.length < 8000, `card too large: ${card.length}`)
+  assert.ok(Buffer.byteLength(card) < 8000, `card exceeds 8KB bytes: ${Buffer.byteLength(card)}`)
 })
 
 test("covenantCard: COV-5 引用视觉探针（probeScript 优先，默认回退正源目录）", () => {
