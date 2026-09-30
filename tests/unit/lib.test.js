@@ -5,10 +5,9 @@ import { execFileSync } from "node:child_process"
 import { join, resolve } from "node:path"
 import { tmpdir, homedir } from "node:os"
 
-const CANON_ASSERT_PATH = resolve(
-  process.env.VIBEWEAVER_SKILL_DIR || join(homedir(), ".config/opencode/skills/vibeweaver"),
-  "scripts/assert_artifacts.py"
-)
+// 本仓 tests/assert_artifacts.py（unit under test：canonical + 2026-09-30 wave-2 五缺陷补丁 + 评审加固）
+const REPO_ASSERT_URL = new URL("../../tests/assert_artifacts.py", import.meta.url)
+const repoAssert = () => readFileSync(REPO_ASSERT_URL, "utf8")
 import {
   findProjectRoot,
   runAssert,
@@ -40,8 +39,7 @@ function makeFullProject() {
   mkdirSync(join(root, "script", "linux"), { recursive: true })
   writeFileSync(join(root, "tests", "verification_log.md"), "## Task\n- iter 1 PASS: x (evidence: tests/acceptance.md, 1/1)\n")
   writeFileSync(join(root, "tests", "acceptance.md"), "> cap=5  stall=3×\n")
-  writeFileSync(join(root, "tests", "assert_artifacts.py"),
-    readFileSync(CANON_ASSERT_PATH, "utf8"))
+  writeFileSync(join(root, "tests", "assert_artifacts.py"), repoAssert())
   writeFileSync(join(root, "memory", "MEMORY.md"), "# Index\n- [T](topic.md) — t\n")
   writeFileSync(join(root, "memory", "topic.md"), "# T\n")
   for (const s of ["start.sh", "stop.sh", "restart.sh", "project_build.sh"]) {
@@ -132,7 +130,7 @@ test("covenantCard: 含 14-16 内容门禁 token（2026-08-28 移植）", () => 
 test("classifyMessages: 主线 18 组新增失败消息一律 blocking（2026-09-30 移植）", () => {
   // 字面串取自主线 canonical assert（tests/assert_artifacts.py）check() 文本，防措辞漂移
   const lines = [
-    "- §V11.9 DOC-asset render gate: report.docx delivered without bound render evidence — add `render: <asset> — <existing page images>` or `render: <asset> — N/A (<missing tool>)` to the log (NO RENDER, NO DONE)",
+    "- §V11.9 DOC-asset render gate: report.docx delivered without bound render evidence — add `render: <asset> — <existing page images>` or `render: <asset> — N/A (soffice missing)` (name the CONCRETE missing tool — soffice|libreoffice|pymupdf|pdftoppm|poppler|imagemagick — never a placeholder) to the log (NO RENDER, NO DONE)",
     "- §V11.9 exec-check: report.docx delivered without a recorded executable-behavior check — add `exec-check: <asset> — clean` or `exec-check: <asset> — escalated → Class CODE` (vbaProject.bin / PDF JS / macro sheet)",
     "--class DOC contradicts the log's `- class: CODE` in the current task block — one class per task (§V11.7)",
   ]
@@ -190,7 +188,7 @@ test("runnerCrashed: Python SyntaxError/IndentationError/超时崩溃识别（I4
 test("checkGate: assert 脚本语法崩溃 → fail-closed blocking（I4）", () => {
   const root = makeFullProject()
   writeFileSync(join(root, "tests", "assert_artifacts.py"),
-    readFileSync(CANON_ASSERT_PATH, "utf8") + "\nthis is not python syntax (((\n")
+    repoAssert() + "\nthis is not python syntax (((\n")
   const gate = checkGate(root)
   assert.ok(gate, "gate must produce a result")
   assert.ok(gate.blocking.length > 0, `checker crash must block, got blocking=[] warnings=${JSON.stringify(gate.warnings)}`)
@@ -210,13 +208,83 @@ test("checkGate: 检查器非零退出但无结构化 - 行 → fail-closed bloc
 test("checkGate: office 资产无 render: 证据行 → blocking 含 render gate（§V11.9 集成）", () => {
   const root = makeFullProject()
   writeFileSync(join(root, "report.docx"), "innocuous placeholder content\n")
-  // 暂存交付（canonical 组 17 经 git diff --cached --name-status 识别；纯 untracked
-  // 被 canonical 的单列解析漏掉 —— 上游 known-gap，见 memory/known_gaps_upstream.md）
   execFileSync("git", ["add", "report.docx"], { cwd: root })
   const gate = checkGate(root)
   assert.ok(gate, "gate must produce a result")
   assert.ok(gate.blocking.some((m) => m.includes("DOC-asset render gate")),
     `expected render-gate blocking, got ${JSON.stringify(gate)}`)
+  rmSync(root, { recursive: true, force: true })
+})
+
+// ── wave-2: canonical 五缺陷补丁 pin（2026-09-30，用户指令本地修复）──
+
+test("assert 类解析: 后写异类 - class: = 机器失败且类取首条（§V11.4#3 去降类）", () => {
+  const root = makeFullProject()
+  rmSync(join(root, "memory"), { recursive: true, force: true })
+  writeFileSync(join(root, "tests", "verification_log.md"),
+    "## Task\n- class: CODE — src/lib.js\n- iter 1 PASS: x (evidence: tests/acceptance.md, 1/1)\n- class: DOC — downgraded\n")
+  const gate = checkGate(root)
+  assert.ok(gate, "de-escalation attempt must fail (was gate=null: DOC last-entry N/A'd memory)")
+  assert.ok(gate.blocking.some((m) => /de-escalat|one class per task/i.test(m)),
+    `expected class de-escalation failure, got ${JSON.stringify(gate)}`)
+  assert.ok((gate.warnings || []).some((m) => m.includes("MEMORY.md")),
+    `first-entry CODE must keep memory required, got ${JSON.stringify(gate)}`)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("assert 渲染绑定: 逐资产精确命名，stem 子串不覆盖（§V11.9）", () => {
+  const root = makeFullProject()
+  writeFileSync(join(root, "report.docx"), "placeholder\n")
+  writeFileSync(join(root, "annual-report.docx"), "placeholder\n")
+  writeFileSync(join(root, "tests", "p1.png"), "png-bytes\n")
+  execFileSync("git", ["add", "report.docx", "annual-report.docx"], { cwd: root })
+  writeFileSync(join(root, "tests", "verification_log.md"),
+    "## Task\n- class: CODE — x\n- iter 1 PASS: x (evidence: tests/acceptance.md, 1/1)\n" +
+    "- render: annual-report.docx — tests/p1.png | pages: 1\n- exec-check: annual-report.docx — clean\n")
+  const gate = checkGate(root)
+  assert.ok(gate, "stem-substring coverage must fail (was gate=null: 'report' stem covered both)")
+  assert.ok(gate.blocking.some((m) => m.includes("DOC-asset render gate: report.docx")),
+    `expected report.docx named uncovered, got ${JSON.stringify(gate)}`)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("assert COV-9: 空 class 不享 DOC 免跑（§V11.2 不确定取高）", () => {
+  const root = makeProject()
+  writeFileSync(join(root, "tests", "assert_artifacts.py"), repoAssert())
+  writeFileSync(join(root, "tests", "verification_log.md"),
+    "## Task\n- iter 1 PASS: x (evidence: tests/acceptance.md, 1/1)\n- COV-9 skipped — documentation-only change\n")
+  const gate = checkGate(root)
+  assert.ok(gate, "unclassified + no baseline must fail (was gate=null: empty class got DOC skip license)")
+  assert.ok(gate.blocking.some((m) => m.includes("Baseline verified GREEN")),
+    `expected COV-9 baseline failure, got ${JSON.stringify(gate)}`)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("assert 组 17 remediation: 模板给被 _line_ok 接受的形态（具名工具无尖括号）", () => {
+  const canon = repoAssert()
+  assert.ok(!canon.includes("N/A (<missing tool>)"), "rejected placeholder form must be gone from the message")
+  assert.ok(/N\/A \(soffice missing\)/.test(canon), "message must show the accepted concrete-tool form")
+})
+
+test("assert 渲染门: 接受形态 render: <asset> — N/A (soffice missing) 通过", () => {
+  const root = makeFullProject()
+  writeFileSync(join(root, "report.docx"), "placeholder\n")
+  execFileSync("git", ["add", "report.docx"], { cwd: root })
+  writeFileSync(join(root, "tests", "verification_log.md"),
+    "## Task\n- class: CODE — x\n- iter 1 PASS: x (evidence: tests/acceptance.md, 1/1)\n" +
+    "- render: report.docx — N/A (soffice missing) · layout risk flagged\n- exec-check: report.docx — clean\n")
+  const gate = checkGate(root)
+  assert.equal(gate, null, `accepted N/A form must pass the render/exec gates, got ${JSON.stringify(gate)}`)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("assert 渲染门: 纯 untracked office 资产被识别（ls-files 单列解析）", () => {
+  const root = makeFullProject()
+  writeFileSync(join(root, "report.docx"), "placeholder\n")
+  const gate = checkGate(root)
+  assert.ok(gate, "untracked asset must be detected (was gate=null: single-column ls-files line dropped)")
+  assert.ok(gate.blocking.some((m) => m.includes("DOC-asset render gate: report.docx")),
+    `expected untracked report.docx named uncovered, got ${JSON.stringify(gate)}`)
   rmSync(root, { recursive: true, force: true })
 })
 
@@ -324,8 +392,7 @@ test("I4 fail-closed: 空壳 assert 脚本 → checkGate 返回 blocking", () =>
 
 test("I4 fail-closed: 合法 assert 脚本 + 崩溃 → runnerCrashed 识别", () => {
   const root = makeProject()
-  const canon = readFileSync(CANON_ASSERT_PATH, "utf8")
-  writeFileSync(join(root, "tests", "assert_artifacts.py"), canon)
+  writeFileSync(join(root, "tests", "assert_artifacts.py"), repoAssert())
   assert.equal(isPlausibleAssertScript(root), true)
   const crashed = [
     { flags: "", output: "Traceback (most recent call last):\n  File \"assert_artifacts.py\", line 3\nSyntaxError" },
@@ -333,5 +400,164 @@ test("I4 fail-closed: 合法 assert 脚本 + 崩溃 → runnerCrashed 识别", (
   ]
   assert.equal(runnerCrashed(crashed), true)
   assert.equal(runnerCrashed([{ flags: "", output: "- tests/verification_log.md missing (COV-1)" }]), false)
+  rmSync(root, { recursive: true, force: true })
+})
+
+// ── wave-2 评审加固 pin（fix-round 1，双评审 Critical/Important PoC 回归网）──
+
+test("assert 资产收集: 大写 D 开头 untracked 路径不再被删除过滤误杀", () => {
+  const root = makeFullProject()
+  mkdirSync(join(root, "Docs"), { recursive: true })
+  writeFileSync(join(root, "Docs", "Document.docx"), "placeholder\n")
+  const gate = checkGate(root)
+  assert.ok(gate, "capital-D untracked asset must be detected (was: startswith('D') dropped it)")
+  assert.ok(gate.blocking.some((m) => m.includes("Document.docx")),
+    `expected Document.docx named uncovered, got ${JSON.stringify(gate)}`)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("assert exec-check 判决: unclean/NOT clean 不再洗白行为门", () => {
+  const root = makeFullProject()
+  writeFileSync(join(root, "report.docx"), "placeholder\n")
+  execFileSync("git", ["add", "report.docx"], { cwd: root })
+  writeFileSync(join(root, "tests", "verification_log.md"),
+    "## Task\n- class: CODE — x\n- iter 1 PASS: x (evidence: tests/acceptance.md, 1/1)\n" +
+    "- render: report.docx — N/A (soffice missing)\n- exec-check: report.docx — unclean: macros active, NOT clean\n")
+  const gate = checkGate(root)
+  assert.ok(gate, "negated verdict must not certify (was: substring 'clean' matched 'unclean')")
+  assert.ok(gate.blocking.some((m) => m.includes("exec-check")),
+    `expected exec-check blocking, got ${JSON.stringify(gate)}`)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("assert 类解析: 缩进/列表符/空格冒号形态的首条声明不可躲避", () => {
+  const root = makeFullProject()
+  rmSync(join(root, "memory"), { recursive: true, force: true })
+  writeFileSync(join(root, "tests", "verification_log.md"),
+    "## Task\n  * class : CODE — src/lib.js\n- iter 1 PASS: x (evidence: tests/acceptance.md, 1/1)\n- class: DOC — downgraded\n")
+  const gate = checkGate(root)
+  assert.ok(gate, "dodged first-entry form must still be detected")
+  assert.ok(gate.blocking.some((m) => /contradiction\/append|one class per task/i.test(m)),
+    `expected class contradiction failure, got ${JSON.stringify(gate)}`)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("assert 渲染绑定: 同名不同目录资产须逐路径绑定", () => {
+  const root = makeFullProject()
+  mkdirSync(join(root, "a"), { recursive: true })
+  mkdirSync(join(root, "b"), { recursive: true })
+  writeFileSync(join(root, "a", "report.docx"), "placeholder\n")
+  writeFileSync(join(root, "b", "report.docx"), "placeholder\n")
+  writeFileSync(join(root, "tests", "p1.png"), "png-bytes\n")
+  execFileSync("git", ["add", "a/report.docx", "b/report.docx"], { cwd: root })
+  writeFileSync(join(root, "tests", "verification_log.md"),
+    "## Task\n- class: CODE — x\n- iter 1 PASS: x (evidence: tests/acceptance.md, 1/1)\n" +
+    "- render: a/report.docx — tests/p1.png | pages: 1\n- exec-check: a/report.docx — clean\n")
+  const gate = checkGate(root)
+  assert.ok(gate, "basename-only row must not cover a same-basename sibling dir")
+  assert.ok(gate.blocking.some((m) => m.includes("report.docx")),
+    `expected sibling named uncovered, got ${JSON.stringify(gate)}`)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("assert 渲染绑定: 连字符分隔行（' - '）仍可绑定", () => {
+  const root = makeFullProject()
+  writeFileSync(join(root, "report.docx"), "placeholder\n")
+  writeFileSync(join(root, "tests", "p1.png"), "png-bytes\n")
+  execFileSync("git", ["add", "report.docx"], { cwd: root })
+  writeFileSync(join(root, "tests", "verification_log.md"),
+    "## Task\n- class: CODE — x\n- iter 1 PASS: x (evidence: tests/acceptance.md, 1/1)\n" +
+    "- render: report.docx - tests/p1.png | pages: 1\n- exec-check: report.docx - clean\n")
+  const gate = checkGate(root)
+  assert.equal(gate, null, `hyphen-separated rows must bind, got ${JSON.stringify(gate)}`)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("assert 渲染证据: N/A 行附伪造页图引用不放行（N/A 仅覆盖零引用行）", () => {
+  const root = makeFullProject()
+  writeFileSync(join(root, "report.docx"), "placeholder\n")
+  execFileSync("git", ["add", "report.docx"], { cwd: root })
+  writeFileSync(join(root, "tests", "verification_log.md"),
+    "## Task\n- class: CODE — x\n- iter 1 PASS: x (evidence: tests/acceptance.md, 1/1)\n" +
+    "- render: report.docx — N/A (soffice missing) tests/p999.png\n- exec-check: report.docx — clean\n")
+  const gate = checkGate(root)
+  assert.ok(gate, "fabricated co-citation must fail (was: N/A short-circuit laundered it)")
+  assert.ok(gate.blocking.some((m) => m.includes("DOC-asset render gate")),
+    `expected render-gate blocking, got ${JSON.stringify(gate)}`)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("assert 资产收集: git C 引号路径解码（CJK 文件名不出八进制幻影资产）", () => {
+  const root = makeFullProject()
+  writeFileSync(join(root, "报告.docx"), "placeholder\n")
+  const gate = checkGate(root)
+  assert.ok(gate, "CJK untracked asset must be detected")
+  assert.ok(!gate.blocking.some((m) => m.includes("\\346")),
+    `octal garbage must not appear in messages, got ${JSON.stringify(gate)}`)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("assert COV-9: 旧任务块的 skipped 行不许可当前块（skip 按块作用域）", () => {
+  const root = makeProject()
+  writeFileSync(join(root, "tests", "assert_artifacts.py"), repoAssert())
+  writeFileSync(join(root, "tests", "verification_log.md"),
+    "## Task\n- class: DOC — old wave\n- iter 1 PASS: x (evidence: tests/acceptance.md, 1/1)\n- COV-9 skipped — documentation-only change\n" +
+    "## Task2\n- iter 2 PASS: x (evidence: tests/acceptance.md, 2/2)\n")
+  const gate = checkGate(root)
+  assert.ok(gate, "older block's skip must not license the current block (was: whole-vl search licensed it)")
+  assert.ok(gate.blocking.some((m) => m.includes("Baseline verified GREEN")),
+    `expected COV-9 baseline failure, got ${JSON.stringify(gate)}`)
+  rmSync(root, { recursive: true, force: true })
+})
+
+// ── fix-round 2 pin（scoped re-review 新回归三处）──
+
+test("assert 资产收集: rename 行取新路径，不出 old\\tnew 幻影资产", () => {
+  const root = makeFullProject()
+  writeFileSync(join(root, "old.docx"), "placeholder\n")
+  execFileSync("git", ["add", "old.docx"], { cwd: root })
+  execFileSync("git", ["commit", "-q", "-m", "add old"], { cwd: root })
+  execFileSync("git", ["mv", "old.docx", "new.docx"], { cwd: root })
+  writeFileSync(join(root, "tests", "p1.png"), "png-bytes\n")
+  writeFileSync(join(root, "tests", "verification_log.md"),
+    "## Task\n- class: CODE — x\n- iter 1 PASS: x (evidence: tests/acceptance.md, 1/1)\n" +
+    "- render: new.docx — tests/p1.png | pages: 1\n- exec-check: new.docx — clean\n")
+  const gate = checkGate(root)
+  assert.equal(gate, null, `renamed asset must bind to its new name, got ${JSON.stringify(gate)}`)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("assert 渲染绑定: 根级同名资产可用裸名覆盖（与子目录同名并存）", () => {
+  const root = makeFullProject()
+  mkdirSync(join(root, "a"), { recursive: true })
+  writeFileSync(join(root, "report.docx"), "placeholder\n")
+  writeFileSync(join(root, "a", "report.docx"), "placeholder\n")
+  writeFileSync(join(root, "tests", "p1.png"), "png-bytes\n")
+  writeFileSync(join(root, "tests", "p2.png"), "png-bytes\n")
+  execFileSync("git", ["add", "report.docx", "a/report.docx"], { cwd: root })
+  writeFileSync(join(root, "tests", "verification_log.md"),
+    "## Task\n- class: CODE — x\n- iter 1 PASS: x (evidence: tests/acceptance.md, 1/1)\n" +
+    "- render: report.docx — tests/p1.png | pages: 1\n- exec-check: report.docx — clean\n" +
+    "- render: a/report.docx — tests/p2.png | pages: 1\n- exec-check: a/report.docx — clean\n")
+  const gate = checkGate(root)
+  assert.equal(gate, null, `root bare-name row must cover the root asset, got ${JSON.stringify(gate)}`)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("assert 渲染绑定: 带目录行不以路径后缀误盖嵌套同名兄弟", () => {
+  const root = makeFullProject()
+  mkdirSync(join(root, "a"), { recursive: true })
+  mkdirSync(join(root, "docs", "a"), { recursive: true })
+  writeFileSync(join(root, "a", "report.docx"), "placeholder\n")
+  writeFileSync(join(root, "docs", "a", "report.docx"), "placeholder\n")
+  writeFileSync(join(root, "tests", "p1.png"), "png-bytes\n")
+  execFileSync("git", ["add", "a/report.docx", "docs/a/report.docx"], { cwd: root })
+  writeFileSync(join(root, "tests", "verification_log.md"),
+    "## Task\n- class: CODE — x\n- iter 1 PASS: x (evidence: tests/acceptance.md, 1/1)\n" +
+    "- render: a/report.docx — tests/p1.png | pages: 1\n- exec-check: a/report.docx — clean\n")
+  const gate = checkGate(root)
+  assert.ok(gate, "nested same-suffix sibling must stay uncovered (was: endswith matched)")
+  assert.ok(gate.blocking.some((m) => m.includes("report.docx")),
+    `expected nested sibling named, got ${JSON.stringify(gate)}`)
   rmSync(root, { recursive: true, force: true })
 })

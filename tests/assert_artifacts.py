@@ -88,6 +88,35 @@ def _git(root, *args):
         return -2, ""
 
 
+def _unquote_git(p: str) -> str:
+    """Decode git's C-quoted path (\"a\\tb\" / \"\\346\\212\\245\\345\\221\\221.docx\")
+    to the real filename — octal escapes are raw UTF-8 bytes (2026-09-30 review)."""
+    if len(p) < 2 or p[0] != '"' or p[-1] != '"':
+        return p
+    body = p[1:-1]
+    simple = {"t": 9, "n": 10, "a": 7, "b": 8, "f": 12, "v": 11, "\\": 0x5C, '"': 0x22}
+    out = bytearray()
+    i, n = 0, len(body)
+    while i < n:
+        ch = body[i]
+        if ch == "\\" and i + 1 < n:
+            nxt = body[i + 1]
+            if nxt in simple:
+                out.append(simple[nxt])
+                i += 2
+                continue
+            if nxt in "01234567" and i + 3 < n and all(c in "01234567" for c in body[i + 2:i + 4]):
+                out.append(int(body[i + 1:i + 4], 8))
+                i += 4
+                continue
+            out.append(ord(nxt))
+            i += 2
+            continue
+        out.extend(ch.encode("utf-8"))
+        i += 1
+    return out.decode("utf-8", "replace")
+
+
 def wave_diff_text(root):
     """Change-wave diff: PER-COMMIT patches of newest `backup: before changes`
     commit..HEAD (a net range diff would hide intra-wave add-then-remove),
@@ -112,7 +141,7 @@ def wave_diff_text(root):
 def untracked_files(root):
     """Untracked, non-gitignored files (never visible in git diff)."""
     rc, out = _git(root, "ls-files", "--others", "--exclude-standard")
-    return [l for l in out.splitlines() if l.strip()] if rc == 0 else []
+    return [_unquote_git(l) for l in out.splitlines() if l.strip()] if rc == 0 else []
 
 
 HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
@@ -358,17 +387,50 @@ def main():
     # Multi-block logs: the CURRENT task is the LAST `## ` block — an older
     # block's `- class:` / `- memory: na` is history and licenses nothing here.
     cur_block = re.split(r"(?m)^(?=## )", vl)[-1] if vl else ""
-    if not cls:
-        m_all = re.findall(r"^-[ \t]*class:[ \t]*(DOC|CONFIG|CODE)[ \t]*[—-][ \t]*(.+)$", cur_block, re.M | re.I)
-        if m_all:
-            cls = m_all[-1][0].upper()
-            cls_basis = "log: - class: " + m_all[-1][0] + " — " + m_all[-1][1].strip()[:60]
-    else:
+
+    # Fence/quote-aware line filter: fenced examples and blockquoted echoes
+    # never license anything (class · render · exec rows alike).
+    def _live_lines(block: str):
+        in_fence = False
+        out = []
+        for _l in block.splitlines():
+            if FENCE.match(_l):
+                in_fence = not in_fence
+                continue
+            if in_fence or _l.lstrip().startswith(">"):
+                continue
+            out.append(_l)
+        return out
+
+    # Widened class-line grammar (2026-09-30 review): indent · list bullets ·
+    # spaced colon · all three dash variants · optional basis — an author must
+    # not be able to hide the FIRST declaration and let a later flush-left line
+    # become "first".
+    _class_re = re.compile(
+        r"^\s*(?:[-*]|\d+[.)])?\s*class\s*:\s*(DOC|CONFIG|CODE)\b\s*(?:[—–-]\s*(.+))?$", re.I)
+    m_all = []
+    for _l in _live_lines(cur_block):
+        _m = _class_re.match(_l)
+        if _m:
+            m_all.append((_m.group(1).upper(), (_m.group(2) or "").strip()))
+    if m_all:
+        # One class per task (§V11.7): the FIRST entry is the basis line; a
+        # later DIFFERENT `- class:` is a contradiction/append attempt —
+        # escalate by EDITING the line, never appending (§V11.4#3 只升不降).
+        _classes = [m[0] for m in m_all]
+        _dups = [c for c in _classes[1:] if c != _classes[0]]
+        if _dups:
+            check(False, f"tests/verification_log.md: class contradiction/append — "
+                         f"`- class: {_classes[0]}` then `- class: {_dups[-1]}` in one task block "
+                         f"(one class per task §V11.7; 升类=改写该行非追加，只升不降 §V11.4#3)")
+    if not cls and m_all:
+        cls = _classes[0]
+        cls_basis = "log: - class: " + m_all[0][0] + (" — " + m_all[0][1][:60] if m_all[0][1] else "")
+    if cls and m_all and args.task_class:
         # flag-vs-log cross-check: a contradicting --class must not silently
         # disable the class's own gates (§V11.7 one class per task).
-        m_flag_log = re.findall(r"^-[ \t]*class:[ \t]*(DOC|CONFIG|CODE)\b", cur_block, re.M | re.I)
-        if m_flag_log and m_flag_log[-1].upper() != cls:
-            check(False, f"--class {cls} contradicts the log's `- class: {m_flag_log[-1].upper()}` "
+        if m_all[0][0] != cls:
+            check(False, f"--class {cls} contradicts the log's `- class: {m_all[0][0]}` "
                          f"in the current task block — one class per task (§V11.7)")
     class_skip_memory = (cls == "DOC" and not re.search(
         r"^- iter \d+ FAIL|^- stall:|cap-hit", cur_block, re.M)) or (
@@ -391,40 +453,96 @@ def main():
                   ["ls-files", "--others", "--exclude-standard"]):
         _rc, _out = _git(root, *_args)
         for _line in _out.splitlines():
-            _line = _line.strip()
-            if not _line or _line.startswith("D"):
+            if not _line.strip():
                 continue
-            _parts = _line.split("\t")
-            if len(_parts) >= 2:
-                _paths.add(_parts[-1])
+            if "\t" in _line:
+                # name-status row: status column carries deletions; only HERE
+                # does `D` mean "not a delivery" (2026-09-30 review C-fix:
+                # a bare path starting with `D` is a delivery, not a deletion).
+                # Rename/copy rows (`R100\told\tnew`) deliver the LAST field.
+                _status, _, _rest = _line.partition("\t")
+                if _status.strip().startswith("D"):
+                    continue
+                if _rest:
+                    _paths.add(_unquote_git(_rest.split("\t")[-1]))
+            else:
+                # `git ls-files --others` prints bare single-column paths — a
+                # tab-less line IS the path (an untracked delivery), not a
+                # malformed name-status row (2026-09-30 wave-2 fix).
+                _paths.add(_unquote_git(_line))
     _wave_assets = sorted(p for p in _paths if _asset_re.search(p))
-    _render_lines = [l for l in cur_block.splitlines()
-                     if re.match(r"^[\s>*+—–-]*\s*render:", l, re.I) and not l.lstrip().startswith(">")]
+    _render_lines = [l for l in _live_lines(cur_block) if re.match(r"^\s*(?:[-*]\s+)?render\s*:", l, re.I)]
     _toolchain_re = re.compile(r"soffice|libreoffice|pymupdf|pdftoppm|poppler|imagemagick", re.I)
 
     def _line_ok(_l):
-        _pngs = [f for f in re.findall(r"tests/(\S+\.(?:png|webm))", _l)
-                 if not os.path.basename(f).lower().startswith("probe_vision.")]
-        _on_disk = any((tests / f).exists() and (tests / f).stat().st_size > 0 for f in _pngs)
-        _na = bool(re.search(r"N/A", _l, re.I)) and bool(_toolchain_re.search(_l)) and "<" not in _l
+        # §V11.9 evidence binding: when page images are cited, EVERY cited
+        # image must exist non-empty under tests/ (no escaping paths — one
+        # real png may not launder a fabricated co-citation); the N/A form is
+        # only a fallback for rows citing NO images at all.
+        _pngs = []
+        for f in re.findall(r"tests/([\w./-]*[\w-]+\.(?:png|webm))", _l):
+            if os.path.basename(f).lower().startswith("probe_vision."):
+                continue
+            _norm = os.path.normpath(f)
+            if _norm.startswith("..") or os.path.isabs(_norm):
+                return False
+            _pngs.append(_norm)
+        _on_disk = bool(_pngs) and all((tests / f).exists() and (tests / f).stat().st_size > 0 for f in _pngs)
+        _na = (not _pngs) and bool(re.search(r"N/A", _l, re.I)) and bool(_toolchain_re.search(_l)) and "<" not in _l
         return _on_disk or _na
 
+    _split_re = re.compile(r"\s+[—–-]\s+")
+
+    def _declared_of(_l):
+        _m = re.match(r"^\s*(?:[-*]\s+)?(?:render|exec-check)\s*:\s*", _l, re.I)
+        if not _m:
+            return None
+        _rest = _l[_m.end():]
+        return _split_re.split(_rest, maxsplit=1)[0].strip().strip('`"\'') or None
+
     def _named(_p, _l):
-        _base = os.path.basename(_p).lower()
-        _stem = os.path.splitext(_base)[0]
-        return _base in _l.lower() or (len(_stem) >= 4 and _stem in _l.lower())
+        # §V11.9 per-asset binding: the row must DECLARE this asset — the token
+        # before the first spaced dash separator, normpath-compared. A
+        # slash-form row binds ONLY its exact path (no suffix matching); a bare
+        # name binds the root-level asset exactly, or a UNIQUE basename.
+        _d = _declared_of(_l)
+        if not _d:
+            return False
+        _p_norm = os.path.normpath(_p.replace("\\", "/")).replace("\\", "/")
+        _d_norm = os.path.normpath(_d.replace("\\", "/")).replace("\\", "/")
+        if _p_norm == _d_norm:
+            return True
+        if "/" in _d_norm:
+            return False
+        if os.path.basename(_p_norm).lower() != _d_norm.lower():
+            return False
+        _same = [a for a in _wave_assets
+                 if os.path.basename(a.replace("\\", "/")).lower() == _d_norm.lower()]
+        return len(_same) <= 1
 
     _uncovered = [p for p in _wave_assets
                   if not any(_named(p, l) and _line_ok(l) for l in _render_lines)]
     if _uncovered:
         check(False, f"§V11.9 DOC-asset render gate: {_uncovered[0]} delivered without bound render "
-                     "evidence — add `render: <asset> — <existing page images>` or `render: <asset> — "
-                     "N/A (<missing tool>)` to the log (NO RENDER, NO DONE)")
+                     "evidence — add `render: <asset> — <existing page images>` or "
+                     "`render: <asset> — N/A (soffice missing)` (name the CONCRETE missing tool — "
+                     "soffice|libreoffice|pymupdf|pdftoppm|poppler|imagemagick — never a placeholder) "
+                     "to the log (NO RENDER, NO DONE)")
     # 17b) §V11.9 exec-check: delivered office assets need the named
     # executable-behavior check recorded (vbaProject/PDF JS/macro sheet).
-    _exec_lines = [l for l in cur_block.splitlines() if re.match(r"^[\s>*-]*\s*exec-check:", l, re.I)]
+    # The verdict is the token AFTER the separator — "unclean"/"not clean"
+    # never certifies ("clean|escalat" substring search was laundersible).
+    _exec_lines = [l for l in _live_lines(cur_block) if re.match(r"^\s*(?:[-*]\s+)?exec-check\s*:", l, re.I)]
+
+    def _exec_ok(_l):
+        _parts = _split_re.split(_l, maxsplit=1)
+        if len(_parts) < 2:
+            return False
+        _verdict = _parts[1].strip().lower()
+        return bool(re.match(r"clean\b", _verdict) or re.match(r"escalat", _verdict))
+
     _exec_uncovered = [p for p in _wave_assets
-                       if not any(_named(p, l) and re.search(r"clean|escalat", l, re.I) for l in _exec_lines)]
+                       if not any(_named(p, l) and _exec_ok(l) for l in _exec_lines)]
     if _exec_uncovered:
         check(False, f"§V11.9 exec-check: {_exec_uncovered[0]} delivered without a recorded "
                      "executable-behavior check — add `exec-check: <asset> — clean` or "
@@ -517,12 +635,19 @@ def main():
     #    their skip must name a mid-task escalation, never "documentation-only".
     if existing:
         baseline_line = bool(re.search(r"Baseline verified GREEN", vl, re.M))
-        escalation_skip = bool(re.search(r"COV-9 skipped[^\n]*escalat", vl, re.M | re.I))
-        doc_skip = bool(re.search(r"COV-9 skipped", vl, re.M)) and cls in ("DOC", "")
+        # The skip license is scoped to the CURRENT task block — an older
+        # block's `COV-9 skipped` is history and licenses nothing here
+        # (same scoping as `- class:`, 2026-09-30 review).
+        escalation_skip = bool(re.search(r"COV-9 skipped[^\n]*escalat", cur_block, re.M | re.I))
+        # The state-skip license is Class DOC ONLY — an empty/absent class is
+        # never DOC (§V11.2 uncertain → HIGHER class): unclassified tasks must
+        # run the baseline or name an escalation (2026-09-30 wave-2 fix).
+        doc_skip = bool(re.search(r"COV-9 skipped", cur_block, re.M)) and cls == "DOC"
         check(baseline_line or escalation_skip or doc_skip,
               "tests/verification_log.md missing `- Baseline verified GREEN` (COV-9); "
-              "`- COV-9 skipped —` licenses Class DOC only — CONFIG/CODE run the baseline "
-              "or name an escalation (§V11.3)")
+              "`- COV-9 skipped —` licenses Class DOC only (with a `- class: DOC — <basis>` "
+              "line or `--class DOC`) — unclassified/CONFIG/CODE run the baseline "
+              "or name an escalation (§V11.2/§V11.3)")
 
     # 10) A4.7b — workflow traces cited in the log must exist >0 bytes (A4.7b)
     for wf in re.findall(r"tests/workflows/(\S+?\.trace\.log)", vl):
