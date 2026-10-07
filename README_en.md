@@ -73,6 +73,15 @@ Traversal is soft, gating is hard: the model walks the graph by interpreting pro
 | **Compaction recovery** | The covenant card is rebuilt automatically after compaction, so long-task context survives |
 | **User control** | `/vibe status` / `/vibe off` per-session switch; `VIBEWEAVER_GATE=off` global kill-switch |
 
+## 2026-10-07: mainline wave15–17 port (working memory · cue triggers · outer loop · enforcement teeth)
+
+Three mainline waves ported under the standing discipline (C8 backlog outer loop; §A7.15 task working memory + §A7.16 cue-anchored triggers + 12b log lint + group 19/`--final`; stall latch + audit B12 + 4b trigger-prefix lint + backlog_check.py):
+
+- **Covenant card** (still <8KB): new C8 route (backlog.json machine-checked `passes` + progress.txt append-only chronicle + one small item per fresh-context iteration + explicit stop signals + backlog_check.py), working_note key-file line (group 19 checks deletion on the `--final` run), the `triggers:` convention (safeGlob caps + 4b prefix lint), the `- final-run: --final` log-line obligation, and 12b placeholder-diagnosis = invalid iteration; the COV-1/8/12/§V11.9 lines were compressed byte-for-byte to fund them.
+- **Mechanisms**: the stall observer gets the mainline latch (one report per stall signature, re-armed by a new iter entry); cueNotes/globToRegExp/parseTriggers/safeGlob ported wholesale, with delivery hoisted above the gate — the post-execute block feedback and the accept hints both carry cues.
+- **Checker**: `tests/assert_artifacts.py` keeps the wave-2 five patches replayed and gains mainline 12b/4b/group 19+`--final` (the not-byte-identical rule stands; `memory/known_gaps_upstream.md` updated); `scripts/backlog_check.py` added.
+- **Verification**: unit suite 65/65 (new groups: latch, cue hit/miss/self/budget/unquoted-inline, CRLF+BOM, card tokens, canonical groups present); 4b smoke-verified firing on the patched copy.
+
 ## 2026-09-30: dual-source update (dsh 0.2.0-rc.2 compatibility scan + mainline COV-13/§V11.9 port)
 
 **dsh side**: npm-pack type-truth comparison from 0.1.0-rc.6 to 0.2.0-rc.2 (same methodology as the 08-29 scan) — every API shape the plugin uses (write/edit `file_path`, `PostToolDecision` accept/block, `agent/pre-step`/`turn-stopping`/`disposed`, `session/event`, `SkillProvider`, `systemPrompt.section`, `commands.register`) is byte-identical or additive-only; the removed `ctx.agent` / `agent/session-start` / `codeRuntime` surfaces were never used by the plugin. **Zero plugin code changes**; upgrading dsh to 0.2.0-rc.2 is safe for the plugin. Watch items: session storage v2→v3 for the bench, the `code`→`ptc` rename, and the adapter now reporting plugin package names by default.

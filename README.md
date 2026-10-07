@@ -73,6 +73,15 @@ flowchart TD
 | **压缩恢复** | compaction 后自动重建契约卡，长任务上下文不丢 |
 | **用户控制** | `/vibe status` / `/vibe off` 会话级开关；`VIBEWEAVER_GATE=off` 全局急停 |
 
+## 2026-10-07：主线 wave15–17 移植（工作记忆 · cue 触发 · 外层循环 · 执行层牙齿）
+
+主线三波（C8 外层循环；§A7.15 任务级工作记忆 + §A7.16 cue 锚定触发 + 12b 日志 lint + group 19/`--final`；stall latch + audit B12 + 4b trigger 前缀 lint + backlog_check.py）按既有移植纪律落地：
+
+- **契约卡**（仍 <8KB）：新增 C8 路由（backlog.json 机检 passes + progress.txt 编年 + 每轮一项 + 显式停止信号 + backlog_check.py）、working_note 关键文件行（含 group 19/`--final` 删除机检）、`triggers:` 约定行（含 safeGlob 上限与 4b 前缀 lint）、`- final-run: --final` 日志行义务、12b 占位 diagnosis=无效迭代；COV-1/8/12/§V11.9 行等长压缩对冲。
+- **机制移植**：stall 观察员与主线同款的 latch（同一停滞签名只报一次，新 iter 重新武装）；cueNotes/globToRegExp/parseTriggers/safeGlob 全套移植，且投递提升于门之上——post-execute 的 block 反馈与 accept 提示两路都携带 cue。
+- **checker**：`tests/assert_artifacts.py` 重放 wave-2 五补丁后移植主线 12b/4b/group 19+`--final`（非字节等同规则不变，memory/known_gaps_upstream.md 已更新重放清单）；`scripts/backlog_check.py` 入库。
+- **验证**：单元 65/65（新增 latch/cue 命中与边界/CRLF+BOM/契约卡 token/canonical 组在位五组）；4b 在带补丁副本上冒烟命中。
+
 ## 2026-09-30：双源更新（dsh 0.2.0-rc.2 兼容扫描 + 主线 COV-13/§V11.9 移植）
 
 **dsh 侧**：对 0.1.0-rc.6 → 0.2.0-rc.2 做 npm-pack 类型真源比对（沿用 08-29 扫描方法论）——插件用到的全部 API 形状（write/edit `file_path`、`PostToolDecision` accept/block、`agent/pre-step`/`turn-stopping`/`disposed`、`session/event`、`SkillProvider`、`systemPrompt.section`、`commands.register`）字节一致或仅附加字段；被移除的 `ctx.agent`/`agent/session-start`/`codeRuntime` 插件均未使用。**插件代码零更改**；升级 dsh 到 0.2.0-rc.2 对插件安全。watch 项：bench 的会话存储 v2→v3、`code`→`ptc` 改名、adapter 默认上报插件包名。

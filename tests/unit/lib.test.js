@@ -19,6 +19,7 @@ import {
   covenantCard,
   inlineCheck,
   checkGate,
+  cueNotes,
   runnerCrashed,
   isPlausibleAssertScript,
 } from "../../src/lib.js"
@@ -560,4 +561,79 @@ test("assert 渲染绑定: 带目录行不以路径后缀误盖嵌套同名兄�
   assert.ok(gate.blocking.some((m) => m.includes("report.docx")),
     `expected nested sibling named, got ${JSON.stringify(gate)}`)
   rmSync(root, { recursive: true, force: true })
+})
+
+// ── 主线 wave16/17 移植：stall latch + cue 触发 + 契约卡新义务 ──
+
+test("stallObservation: latch——同一停滞签名只报一次，新 iter 重新武装（wave17 移植）", () => {
+  const root = makeProject()
+  mkdirSync(join(root, "src"), { recursive: true })
+  const f = join(root, "src", "x.js")
+  const msgs = []
+  for (let i = 0; i < 5; i++) {
+    writeFileSync(f, `// ${i}\n`)
+    const m = stallObservation(root, f)
+    if (m) msgs.push(m)
+  }
+  assert.equal(msgs.length, 1, `stall must fire once, got ${msgs.length}`)
+  // 新 iter 条目 → 重新武装
+  const log = join(root, "tests", "verification_log.md")
+  writeFileSync(log, readFileSync(log, "utf8") + "- iter 2 PASS: re-arm (evidence: inline)\n")
+  let fired = null
+  for (let i = 0; i < 3; i++) {
+    writeFileSync(f, `// b${i}\n`)
+    const m = stallObservation(root, f)
+    if (m) fired = m
+  }
+  assert.ok(fired, "new iter entry must re-arm the stall observer")
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("cueNotes: 命中/不命中/memory 自指/上限/无引号行内列表（wave16 移植）", () => {
+  const root = makeProject()
+  mkdirSync(join(root, "memory"), { recursive: true })
+  mkdirSync(join(root, "src", "auth"), { recursive: true })
+  writeFileSync(join(root, "memory", "fix_auth.md"), '---\ntype: fix\nstatus: ❌\ntriggers:\n  - "src/auth/**"\n---\n# Auth trap\n')
+  writeFileSync(join(root, "memory", "reference_uq.md"), '---\ntype: reference\ntriggers: [src/uq/**, db/**]\n---\n# Unquoted\n')
+  writeFileSync(join(root, "memory", "fix_evil.md"), '---\ntype: fix\ntriggers:\n  - "**/**/**/**/**/**/zz"\n---\n# ReDoS\n')
+  const hit = cueNotes(root, join(root, "src", "auth", "a.ts"))
+  assert.equal(hit.length, 1)
+  assert.ok(hit[0].includes("fix_auth.md") && hit[0].includes("❌"))
+  assert.deepEqual(cueNotes(root, join(root, "src", "other", "b.ts")), [])
+  assert.deepEqual(cueNotes(root, join(root, "memory", "fix_auth.md")), [], "memory self-edit never cues")
+  assert.ok(cueNotes(root, join(root, "src", "uq", "c.ts"))[0]?.includes("reference_uq.md"), "unquoted inline list must fire")
+  assert.deepEqual(cueNotes(root, join(root, "a", "b", "c", "d", "e", "f", "zz")), [], ">2 ** groups rejected")
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("cueNotes: CRLF+BOM 主题文件仍投递（wave16 移植）", () => {
+  const root = makeProject()
+  mkdirSync(join(root, "memory"), { recursive: true })
+  mkdirSync(join(root, "src", "win"), { recursive: true })
+  writeFileSync(join(root, "memory", "fix_crlf.md"), "﻿---\r\ntype: fix\r\ntriggers:\r\n  - \"src/win/**\"\r\n---\r\n# CRLF\r\n")
+  const hit = cueNotes(root, join(root, "src", "win", "w.ts"))
+  assert.equal(hit.length, 1)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("covenantCard: 含 wave15-17 主线义务 token（2026-10-07 移植）", () => {
+  const card = covenantCard({ skillSourceDir: "/tmp/skills" })
+  assert.ok(card.includes("tests/working_note.md"), "§A7.15 working note")
+  assert.ok(card.includes("triggers:"), "§A7.16 cue triggers")
+  assert.ok(card.includes("--final"), "final-run flag")
+  assert.ok(card.includes("final-run:"), "final-run log line")
+  assert.ok(card.includes("C8 外层循环"), "C8 route")
+  assert.ok(card.includes("backlog_check.py"), "backlog mechanism")
+  assert.ok(card.includes("12b"), "diagnosis substance lint")
+  assert.ok(card.includes("组 1-19"), "19 groups")
+  assert.ok(card.includes("4b"), "trigger prefix lint")
+  assert.ok(Buffer.byteLength(card) < 8000, `card exceeds 8KB bytes: ${Buffer.byteLength(card)}`)
+})
+
+test("canonical assert: 12b/4b/19 组与 --final 旗标在位（wave16/17 同步）", () => {
+  const canon = repoAssert()
+  assert.ok(canon.includes("diagnosis is a placeholder"), "12b substance lint")
+  assert.ok(canon.includes("literal prefix"), "4b trigger-prefix lint")
+  assert.ok(canon.includes("working_note.md still present"), "group 19")
+  assert.ok(canon.includes('"--final"'), "--final flag")
 })

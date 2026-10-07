@@ -13,6 +13,7 @@ import {
   covenantCard,
   findProjectRoot,
   invalidateGateCache,
+  cueNotes,
   GATED_TOOLS,
 } from "./lib.js"
 
@@ -151,13 +152,17 @@ export function apply(ctx, config = {}) {
     const root = findProjectRoot(filePath)
     if (!root) return next()
     invalidateGateCache(root) // 写操作已落盘 → 缓存失效, 本次检查重跑
+    // cue 投递提升于门之上（主线 wave16）：门红时恰是「动手前先读」必须在场
+    // 的时刻——block 反馈与 accept 提示两路都携带。
+    const cues = cueNotes(root, filePath)
     const gate = checkGate(root)
     const base = () => ({ kind: "accept", content: result.content })
     if (gate && gate.blocking.length) {
       const msg = blockMessage(root, gate)
-      return { kind: "block", feedback: [{ type: "text", text: msg }] }
+      const text = cues.length ? msg + "\n" + cues.join("\n") : msg
+      return { kind: "block", feedback: [{ type: "text", text }] }
     }
-    const warns = []
+    const warns = [...cues]
     if (gate && gate.warnings.length) {
       warns.push("[GATE-WARNING (vibeweaver)] non-blocking: " + gate.warnings.join("; ") + " — fix before the final [Verification Gate] line.")
     }
