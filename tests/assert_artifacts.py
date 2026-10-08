@@ -757,12 +757,25 @@ def main():
     #     the note is GONE at completion; this group checks it EXISTED during the
     #     work. Current task block (last `## ` block) with ≥2 iter entries or ≥1
     #     FAIL owes `- working-note:` lifecycle lines or a stated `na (<why>)`.
-    blocks = re.split(r"(?m)^(?=## )", vl)
-    cur = blocks[-1] if blocks else vl
-    iters = len(re.findall(r"(?m)^- iter \d+ (?:PASS|FAIL):", cur))
-    has_fail = bool(re.search(r"(?m)^- iter \d+ FAIL:", cur))
-    if iters >= 2 or has_fail:
-        check(bool(re.search(r"(?m)^- working-note:\s*\S", cur)),
+    live = []
+    in_fence = False
+    for _l in vl.splitlines():
+        if FENCE.match(_l):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        live.append(_l)
+    blocks = re.split(r"(?m)^(?=## )", "\n".join(live))
+    cur = ""
+    for _b in blocks:
+        if re.search(r"(?m)^- iter \d+ (?:PASS|FAIL):", _b):
+            cur = _b
+    if cur:
+        iters = len(re.findall(r"(?m)^- iter \d+ (?:PASS|FAIL):", cur))
+        has_fail = bool(re.search(r"(?m)^- iter \d+ FAIL:", cur))
+        if iters >= 2 or has_fail:
+            check(bool(re.search(r"(?m)^- working-note:\s*\S", cur)),
               "verification_log.md current task block: ≥2 iterations / a FAIL without "
               "`- working-note:` lifecycle lines (created → updated → distilled → deleted) "
               "or a stated `- working-note: na (<why>)` (§A7.15 creation side)")
