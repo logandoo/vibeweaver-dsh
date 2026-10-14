@@ -77,7 +77,7 @@ flowchart TD
 
 主线 10-14 两波（§A4.1.2 measure-then-judge；`scripts/ui_fidelity.py` 像素/几何仪器；mm_probe comparative 子探针与 refboxes 图像参考区域提取）落地：
 
-- **契约卡**（仍 <8KB：四配置实测 7895/7945/7967B，全 <8000——含生产默认与展开路径）：新增 §A4.1.2 行——判据含像素/几何保真时「先测量后判定」，几何/尺寸/遮挡只由仪器认证（`ui_fidelity.py diff/boxes`、图像参考 `refboxes`、比较能力 `mm_probe --compare-*`），VLM 永不认证几何；6 处义务回补（评审裁定）+ 11 处冗余压缩对冲，净 −54B（见本波 log）。
+- **契约卡**（仍 <8KB：四配置实测 7895/7945/7967B，全 <8000——含生产默认与展开路径）：新增 §A4.1.2 行——判据含像素/几何保真时「先测量后判定」，几何/尺寸/遮挡只由仪器认证（`ui_fidelity.py diff/boxes`、图像参考 `refboxes`、比较能力 `mm_probe --compare-*`），VLM 永不认证几何；6 处义务回补（评审裁定）+ 11 处冗余压缩对冲，净 −57B（见本波 log）。
 - **脚本**：`scripts/mm_probe.py` 换主线当前版（comparative 子探针：双面板单处差异 ×5 变体、盐化哈希 GT、语义自检、协议禁读 GT）；新增 `scripts/ui_fidelity.py`（pixelmatch v5.3.0 移植 + 聚类 + boxes 遮挡/重叠 + refboxes；纯 stdlib；`--selftest` 26 checks）。两脚本与主线逐字节一致；`package.json` files 补齐。
 - **范围裁定**（ADR D-4）：assert 自 10-08 零漂移不搬；loop-guard/记忆投递/文档债等无卡内锚点，备录不搬。
 - **顺带清偿**：assert `--existing` 32/32、`--final` 33/33 exit 0（基线预存 group-20 失败由本波新块修复；另 2026-08-19 一条遗留行 diagnosis 扩为实质从句以满足 wave16 12b lint，语义保留并注明）。
