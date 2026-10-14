@@ -185,6 +185,10 @@ test("covenantCard: 含 §A4.1.2 拷贝保真 token（2026-10-14 uif 移植）",
   assert.ok(card.includes("ui_fidelity"))
   assert.ok(card.includes("永不认证几何"))
   assert.ok(Buffer.byteLength(card) < 8000, `card exceeds 8KB bytes: ${Buffer.byteLength(card)}`)
+  // 生产默认配置（~/.config/... 路径）也受同一帽约束（路径长度 +50B）
+  const defaultCard = covenantCard({})
+  assert.ok(Buffer.byteLength(defaultCard) < 8000,
+            `default-config card exceeds 8KB bytes: ${Buffer.byteLength(defaultCard)}`)
 })
 
 test("scripts 移植: comparative + refboxes 锚词在盘（2026-10-14 uif 移植）", () => {
@@ -194,6 +198,20 @@ test("scripts 移植: comparative + refboxes 锚词在盘（2026-10-14 uif 移�
   const uif = readFileSync(new URL("../../scripts/ui_fidelity.py", import.meta.url), "utf8")
   assert.ok(uif.includes("refboxes"), "ui_fidelity must carry refboxes")
   assert.ok(uif.includes("pixelmatch"), "ui_fidelity must be the pixelmatch port")
+  // 行为锚：脚本本体自检必须真跑得通（词面在、功能被掏空 = 拦）
+  const repo = new URL("../../", import.meta.url)
+  const probeOut = execFileSync("python3", ["scripts/mm_probe.py", "--selftest"],
+                                { cwd: repo, encoding: "utf8", timeout: 60000 })
+  assert.ok(probeOut.includes("selftest PASS"), "mm_probe selftest must pass")
+  const uifOut = execFileSync("python3", ["scripts/ui_fidelity.py", "--selftest"],
+                              { cwd: repo, encoding: "utf8", timeout: 60000 })
+  assert.ok(uifOut.includes("selftest PASS"), "ui_fidelity selftest must pass")
+})
+
+test("lib/lib.js 与 src/lib.js 逐字节一致（发货件镜像，2026-10-14 uif 移植）", () => {
+  const lib = readFileSync(new URL("../../lib/lib.js", import.meta.url), "utf8")
+  const src = readFileSync(new URL("../../src/lib.js", import.meta.url), "utf8")
+  assert.equal(lib, src, "lib/lib.js must mirror src/lib.js (run bash script/linux/project_build.sh)")
 })
 
 

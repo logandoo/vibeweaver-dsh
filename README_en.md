@@ -77,11 +77,11 @@ Traversal is soft, gating is hard: the model walks the graph by interpreting pro
 
 The two 10-14 mainline waves (§A4.1.2 measure-then-judge; `scripts/ui_fidelity.py` pixel/geometry instrumentation; the mm_probe comparative sub-probe and `refboxes` reference-image region extraction) land under the standing port discipline:
 
-- **Covenant card** (still <8KB, 7952B): a new §A4.1.2 line — when acceptance criteria name copy fidelity, measure first, judge second: geometry/size/occlusion are certified only by instruments (`ui_fidelity.py diff/boxes`, `refboxes` for image references, `mm_probe --compare-*` for comparative calibration), and the VLM never certifies geometry; 17 equal-length compressions offset the addition (meaning preserved; see this wave's log).
+- **Covenant card** (still <8KB: four configs measured 7895/7945/7967B, all <8000 — including the production default and expanded paths): a new §A4.1.2 line — when acceptance criteria name copy fidelity, measure first, judge second: geometry/size/occlusion are certified only by instruments (`ui_fidelity.py diff/boxes`, `refboxes` for image references, `mm_probe --compare-*` for comparative calibration), and the VLM never certifies geometry; six obligation restores (review-adjudicated) offset by eleven redundancy compressions, net −54B (see this wave's log).
 - **Scripts**: `scripts/mm_probe.py` refreshed to current mainline (comparative sub-probe: one-change panels × 5 variants, salted-hash ground truth, semantic selftest, protocol guard against reading the expected file); new `scripts/ui_fidelity.py` (pixelmatch v5.3.0 port + clustering + boxes overlap/occlusion + refboxes; stdlib only; `--selftest` 26 checks). Both byte-identical to mainline; package.json files updated.
 - **Scope call** (ADR D-4): the assert has zero drift since 10-08 (not ported); loop-guard / memory-delivery / doc-debt waves have no card anchors (recorded, not ported).
-- **Incidental debt cleared**: assert `--existing` 31/31 exit 0 (the baseline group-20 pre-existing failure is cured by this wave's new log block; one 2026-08-19 legacy diagnosis line was expanded to a substantive clause to satisfy the later wave16 12b lint — meaning preserved and annotated).
-- **Verification**: unit 66→68 (new pins: card anchors + byte cap; script anchors); `project_build.sh` exit 0 with lib==src; both script selftests PASS.
+- **Incidental debt cleared**: assert `--existing` 32/32 and `--final` 33/33 exit 0 (the baseline group-20 pre-existing failure is cured by this wave's new log block; one 2026-08-19 legacy diagnosis line was expanded to a substantive clause to satisfy the later wave16 12b lint — meaning preserved and annotated).
+- **Verification**: unit 66→69 (new pins: card anchors + dual-config byte caps; script word + behavior anchors; lib mirror); `project_build.sh` exit 0 with lib==src.
 
 ## 2026-10-07: mainline wave15–17 port (working memory · cue triggers · outer loop · enforcement teeth)
 
