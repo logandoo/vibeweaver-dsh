@@ -179,6 +179,24 @@ test("index.js 激活/重建文本覆盖 COV-1..13（2026-09-30 移植）", () =
   assert.equal(libSrc, src, "lib/index.js must mirror src/index.js (run bash script/linux/project_build.sh)")
 })
 
+test("covenantCard: 含 §A4.1.2 拷贝保真 token（2026-10-14 uif 移植）", () => {
+  const card = covenantCard({ skillSourceDir: "/tmp/skills" })
+  assert.ok(card.includes("A4.1.2"))
+  assert.ok(card.includes("ui_fidelity"))
+  assert.ok(card.includes("永不认证几何"))
+  assert.ok(Buffer.byteLength(card) < 8000, `card exceeds 8KB bytes: ${Buffer.byteLength(card)}`)
+})
+
+test("scripts 移植: comparative + refboxes 锚词在盘（2026-10-14 uif 移植）", () => {
+  const probe = readFileSync(new URL("../../scripts/mm_probe.py", import.meta.url), "utf8")
+  assert.ok(probe.includes("COMPARE_VARIANTS"), "mm_probe must carry the comparative sub-probe")
+  assert.ok(probe.includes("--compare-check"), "mm_probe must expose --compare-check")
+  const uif = readFileSync(new URL("../../scripts/ui_fidelity.py", import.meta.url), "utf8")
+  assert.ok(uif.includes("refboxes"), "ui_fidelity must carry refboxes")
+  assert.ok(uif.includes("pixelmatch"), "ui_fidelity must be the pixelmatch port")
+})
+
+
 test("runnerCrashed: Python SyntaxError/IndentationError/超时崩溃识别（I4 fail-closed）", () => {
   assert.equal(runnerCrashed([{ flags: "", output: '  File "tests/assert_artifacts.py", line 3\nSyntaxError: invalid syntax' }]), true)
   assert.equal(runnerCrashed([{ flags: "", output: "IndentationError: unexpected indent" }]), true)

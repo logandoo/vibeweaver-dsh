@@ -19,7 +19,8 @@
     "lib/index.js",
     "lib/baseline.js",
     "cordis.patch.yml",
-    "scripts/mm_probe.py"
+    "scripts/mm_probe.py",
+    "scripts/ui_fidelity.py"
   ],
   "license": "MIT"
 }
