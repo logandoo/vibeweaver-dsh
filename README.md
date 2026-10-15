@@ -219,3 +219,7 @@ bash script/linux/smoke.sh           # headless 冒烟
 ## 许可证
 
 MIT
+
+## 移植记录 2026-10-15b
+
+主线硬化波双向对账：assert_artifacts 合并主线 P0/P1（fail-closed JSON/C1 派生类/C2 媒体校验/封册/按块 COV-9）与本侧硬化（首条类解析、_unquote_git、逐资产绑定、exec 判决）；lib.js 移植 D4 fail-closed（BLOCKING_HINTS 退役）；卡片 E2' 措辞 + <8KB 保持；单测 69/69，assert --existing --final 40/40。

@@ -8,6 +8,9 @@ import { tmpdir, homedir } from "node:os"
 // 本仓 tests/assert_artifacts.py（unit under test：canonical + 2026-09-30 wave-2 五缺陷补丁 + 评审加固）
 const REPO_ASSERT_URL = new URL("../../tests/assert_artifacts.py", import.meta.url)
 const repoAssert = () => readFileSync(REPO_ASSERT_URL, "utf8")
+// C2 (2026-10-15b): render-gate fixtures must be FORMAT-VALID — magic bytes
+// + IHDR >= 320x200 (the gate rejects 1-byte pseudo-screenshots by design)
+const PNG640 = Buffer.from("89504e470d0a1a0a0000000d4948445200000280000001900806000000" + "00".repeat(32), "hex")
 import {
   findProjectRoot,
   runAssert,
@@ -96,16 +99,20 @@ test("runAssert: 证据缺失的项目返回 ok=false 且含 attempts", () => {
   rmSync(root, { recursive: true, force: true })
 })
 
-test("classifyMessages: BLOCKING_HINTS 分类", () => {
+test("classifyMessages: fail-closed — 所有失败行一律 blocking（D4 2026-10-15b 移植）", () => {
+  // 旧 BLOCKING_HINTS 关键词分类让 memory/git-count 失败行放行（fail-open）；
+  // D4 合同：非 WARN 行全部 blocking。提示词表退役（mainline 同步）。
   const lines = [
     "- tests/verification_log.md has no `- iter N PASS/FAIL:` entries (COV-1)",
     "- memory/MEMORY.md missing (A7.10)",
     "- new-project git repo needs >=2 commits (C1)",
+    "WARN thin memory index",
   ]
   const { blocking, warnings } = classifyMessages(lines)
   assert.ok(blocking.some((m) => m.includes("verification_log")))
-  assert.ok(warnings.some((m) => m.includes("MEMORY.md")))
-  assert.ok(warnings.some((m) => m.includes("git repo")))
+  assert.ok(blocking.some((m) => m.includes("MEMORY.md")), "hint-free failure must block (was fail-open)")
+  assert.ok(blocking.some((m) => m.includes("git repo")), "hint-free failure must block (was fail-open)")
+  assert.ok(warnings.some((m) => m.includes("thin memory index")), "WARN lines stay advisory")
 })
 
 test("classifyMessages: 组 14-16 内容门禁消息一律 blocking（2026-08-28 移植）", () => {
@@ -264,8 +271,11 @@ test("assert 类解析: 后写异类 - class: = 机器失败且类取首条（§
   assert.ok(gate, "de-escalation attempt must fail (was gate=null: DOC last-entry N/A'd memory)")
   assert.ok(gate.blocking.some((m) => /de-escalat|one class per task/i.test(m)),
     `expected class de-escalation failure, got ${JSON.stringify(gate)}`)
-  assert.ok((gate.warnings || []).some((m) => m.includes("MEMORY.md")),
-    `first-entry CODE must keep memory required, got ${JSON.stringify(gate)}`)
+  // D4 fail-closed: the memory requirement is a BLOCKING failure now (the
+  // old hint tier let structure failures through) — first-entry CODE keeps it
+  // required either way.
+  assert.ok(gate.blocking.some((m) => m.includes("MEMORY.md")),
+    `first-entry CODE must keep memory required (blocking), got ${JSON.stringify(gate)}`)
   rmSync(root, { recursive: true, force: true })
 })
 
@@ -273,7 +283,7 @@ test("assert 渲染绑定: 逐资产精确命名，stem 子串不覆盖（§V11.
   const root = makeFullProject()
   writeFileSync(join(root, "report.docx"), "placeholder\n")
   writeFileSync(join(root, "annual-report.docx"), "placeholder\n")
-  writeFileSync(join(root, "tests", "p1.png"), "png-bytes\n")
+  writeFileSync(join(root, "tests", "p1.png"), PNG640)
   execFileSync("git", ["add", "report.docx", "annual-report.docx"], { cwd: root })
   writeFileSync(join(root, "tests", "verification_log.md"),
     "## Task\n- class: CODE — x\n- iter 1 PASS: x (evidence: tests/acceptance.md, 1/1)\n" +
@@ -485,7 +495,7 @@ test("assert 渲染绑定: 同名不同目录资产须逐路径绑定", () => {
   mkdirSync(join(root, "b"), { recursive: true })
   writeFileSync(join(root, "a", "report.docx"), "placeholder\n")
   writeFileSync(join(root, "b", "report.docx"), "placeholder\n")
-  writeFileSync(join(root, "tests", "p1.png"), "png-bytes\n")
+  writeFileSync(join(root, "tests", "p1.png"), PNG640)
   execFileSync("git", ["add", "a/report.docx", "b/report.docx"], { cwd: root })
   writeFileSync(join(root, "tests", "verification_log.md"),
     "## Task\n- class: CODE — x\n- iter 1 PASS: x (evidence: tests/acceptance.md, 1/1)\n" +
@@ -500,7 +510,7 @@ test("assert 渲染绑定: 同名不同目录资产须逐路径绑定", () => {
 test("assert 渲染绑定: 连字符分隔行（' - '）仍可绑定", () => {
   const root = makeFullProject()
   writeFileSync(join(root, "report.docx"), "placeholder\n")
-  writeFileSync(join(root, "tests", "p1.png"), "png-bytes\n")
+  writeFileSync(join(root, "tests", "p1.png"), PNG640)
   execFileSync("git", ["add", "report.docx"], { cwd: root })
   writeFileSync(join(root, "tests", "verification_log.md"),
     "## Task\n- class: CODE — x\n- iter 1 PASS: x (evidence: tests/acceptance.md, 1/1)\n" +
@@ -555,7 +565,7 @@ test("assert 资产收集: rename 行取新路径，不出 old\\tnew 幻影资�
   execFileSync("git", ["add", "old.docx"], { cwd: root })
   execFileSync("git", ["commit", "-q", "-m", "add old"], { cwd: root })
   execFileSync("git", ["mv", "old.docx", "new.docx"], { cwd: root })
-  writeFileSync(join(root, "tests", "p1.png"), "png-bytes\n")
+  writeFileSync(join(root, "tests", "p1.png"), PNG640)
   writeFileSync(join(root, "tests", "verification_log.md"),
     "## Task\n- class: CODE — x\n- iter 1 PASS: x (evidence: tests/acceptance.md, 1/1)\n" +
     "- render: new.docx — tests/p1.png | pages: 1\n- exec-check: new.docx — clean\n")
@@ -569,8 +579,8 @@ test("assert 渲染绑定: 根级同名资产可用裸名覆盖（与子目录�
   mkdirSync(join(root, "a"), { recursive: true })
   writeFileSync(join(root, "report.docx"), "placeholder\n")
   writeFileSync(join(root, "a", "report.docx"), "placeholder\n")
-  writeFileSync(join(root, "tests", "p1.png"), "png-bytes\n")
-  writeFileSync(join(root, "tests", "p2.png"), "png-bytes\n")
+  writeFileSync(join(root, "tests", "p1.png"), PNG640)
+  writeFileSync(join(root, "tests", "p2.png"), PNG640)
   execFileSync("git", ["add", "report.docx", "a/report.docx"], { cwd: root })
   writeFileSync(join(root, "tests", "verification_log.md"),
     "## Task\n- class: CODE — x\n- iter 1 PASS: x (evidence: tests/acceptance.md, 1/1)\n" +
@@ -587,7 +597,7 @@ test("assert 渲染绑定: 带目录行不以路径后缀误盖嵌套同名兄�
   mkdirSync(join(root, "docs", "a"), { recursive: true })
   writeFileSync(join(root, "a", "report.docx"), "placeholder\n")
   writeFileSync(join(root, "docs", "a", "report.docx"), "placeholder\n")
-  writeFileSync(join(root, "tests", "p1.png"), "png-bytes\n")
+  writeFileSync(join(root, "tests", "p1.png"), PNG640)
   execFileSync("git", ["add", "a/report.docx", "docs/a/report.docx"], { cwd: root })
   writeFileSync(join(root, "tests", "verification_log.md"),
     "## Task\n- class: CODE — x\n- iter 1 PASS: x (evidence: tests/acceptance.md, 1/1)\n" +

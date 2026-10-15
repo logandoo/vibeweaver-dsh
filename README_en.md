@@ -220,3 +220,8 @@ bash script/linux/smoke.sh           # headless smoke test
 ## License
 
 MIT
+
+
+## Port note 2026-10-15b
+
+Bidirectional reconciliation with the mainline hardening wave: assert_artifacts merges mainline P0/P1 (fail-closed JSON, C1 derived class, C2 media validation, seal manifest, per-block COV-9) with this side's hardening (first-entry class, _unquote_git, per-asset binding, exec verdict); lib.js ports D4 fail-closed (BLOCKING_HINTS retired); card wording E2' + <8KB held; unit 69/69, assert --existing --final 40/40.
