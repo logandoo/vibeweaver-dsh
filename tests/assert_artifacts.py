@@ -172,10 +172,12 @@ def parse_diff(text):
         if h:
             nline = int(h.group(1))
         elif line.startswith("--- a/"):
-            cur = line[6:]
+            # review R-I2: git C-quotes odd names ("tests/caf\303\251.py")
+            # and pads space-names with a trailing tab — normalize both
+            cur = _unquote_git(line[6:].rstrip("\t"))
             files.setdefault(cur, [[], []])
         elif line.startswith("+++ b/"):
-            cur = line[6:]
+            cur = _unquote_git(line[6:].rstrip("\t"))
             files.setdefault(cur, [[], []])
         elif line.startswith("--- /dev/null"):
             cur = None
@@ -202,7 +204,7 @@ def _is_test_code(path):
             or ".test." in n or ".spec." in n)
 
 
-def secret_scan(root, vl=""):
+def secret_scan(root, vl=""):  # vl = CURRENT task block (approval scoping)
     """Group 14 — secret scan. Returns (fails, warns). Only ADDED diff lines
     and untracked files; placeholder-marked lines exempt; .md warn-only;
     any assert_artifacts.py never scanned. A `vw-approved` inline marker
@@ -260,13 +262,13 @@ def secret_scan(root, vl=""):
     return fails, warns
 
 
-SKIP_MARKER = re.compile(r"@pytest\.mark\.(?:skip|xfail)|@unittest\.skip|\.skip\(|\.skipIf|xfail\s*\(|\bxtest\b|\bfit\s*\(")
+SKIP_MARKER = re.compile(r"@pytest\.mark\.(?:skip|xfail)|@unittest\.skip|\b(?:it|test|describe|this)\.skip|\bxfail\s*\(|\bxtest\b|\bskipTest\s*\(")
 TEST_BASENAMES = {"conftest.py", "pytest.ini", "tox.ini", "setup.cfg",
                   "jest.config.js", "jest.config.ts", "vitest.config.ts",
                   "vitest.config.js"}
 
 
-def test_change_guard(root, vl):
+def test_change_guard(root, vl):  # vl = CURRENT task block (license scoping, review R-I2)
     """Group 15 — test-change guard: REMOVED assertion lines in test code
     files require a `- test-change: <path> — <reason>` log line."""
     fails = []
@@ -320,11 +322,21 @@ def test_change_guard(root, vl):
 
 def code_fingerprint(root):
     """digest of wave code content — SHARED CONTRACT with
-    scripts/evidence_seal.py (keep both spellings identical)."""
+    scripts/evidence_seal.py: identical ext set AND identical file-set
+    derivation (backup..HEAD + uncommitted + untracked; review R-I2)."""
+    rc, sha = _git(root, "log", "--format=%H", "-1", "--fixed-strings",
+                   "--grep=backup: before changes")
+    paths = set()
+    if rc == 0 and sha.strip():
+        _, out = _git(root, "diff", "--name-only", f"{sha.strip()}..HEAD")
+        paths.update(l.strip() for l in out.splitlines() if l.strip())
+    _, out = _git(root, "diff", "--name-only", "HEAD")
+    paths.update(l.strip() for l in out.splitlines() if l.strip())
+    paths.update(untracked_files(root))
     parts = []
-    for rel in sorted(set(parse_diff(wave_diff_text(root)).keys()) | set(untracked_files(root))):
+    for rel in sorted(_unquote_git(r) for r in paths):
         ext = os.path.splitext(rel)[1].lower()
-        if ext not in CODE_KIND_EXT or rel.startswith("tests/") or "assert_artifacts.py" in rel:
+        if ext not in CODE_KIND_EXT or rel.startswith("tests/") or "assert_artifacts.py" in rel or "evidence_seal.py" in rel:
             continue
         fp = root / rel
         parts.append(f"{rel}:{hashlib.sha256(fp.read_bytes()).hexdigest() if fp.is_file() else 'gone'}")
@@ -583,7 +595,25 @@ def main():
     cls_basis = "--class flag"
     # Multi-block logs: the CURRENT task is the LAST `## ` block — an older
     # block's `- class:` / `- memory: na` is history and licenses nothing here.
-    cur_block = re.split(r"(?m)^(?=## )", vl)[-1] if vl else ""
+    # A trailing non-task `## ` heading must not truncate the current task
+    # (review R-I4) — the task block is the last ITER-BEARING block, same
+    # selection group 20 uses.
+    def _last_iter_block(block_text: str) -> str:
+        _live = []
+        _fence = False
+        for _l in block_text.splitlines():
+            if FENCE.match(_l):
+                _fence = not _fence
+                continue
+            if not _fence:
+                _live.append(_l)
+        _cur = ""
+        for _b in re.split(r"(?m)^(?=## )", "\n".join(_live)):
+            if re.search(r"(?m)^- iter \d+ (?:PASS|FAIL)\b", _b):
+                _cur = _b
+        return _cur or re.split(r"(?m)^(?=## )", block_text)[-1]
+
+    cur_block = _last_iter_block(vl) if vl else ""
 
     # Fence/quote-aware line filter (dsh 2026-09-30): fenced examples and
     # blockquoted echoes never license anything (class · render · exec rows).
@@ -698,7 +728,7 @@ def main():
         # co-citation); N/A only for rows citing NO images. Mainline C2/BL-14
         # on top: real media magic + IHDR >= 320x200 for render PNGs.
         _pngs = []
-        for f in re.findall(r"tests/([\w./-]*[\w-]+\.(?:png|webm))", _l):
+        for f in re.findall(r"tests/([\w./-]*[\w-]+\.(?:png|webm))", _l, re.I):
             if os.path.basename(f).lower().startswith("probe_vision."):
                 continue
             _norm = os.path.normpath(f)
@@ -785,7 +815,7 @@ def main():
     # 1) verification_log — exists, has >=1 standard iteration entry (COV-1)
     group("1")
     check(vl and len(vl.strip()) > 0, "tests/verification_log.md missing or empty (COV-1)")
-    check(bool(re.search(r"^- iter \d+ (PASS|FAIL):", vl, re.M)),
+    check(bool(re.search(r"^- iter \d+ (PASS|FAIL)\b", vl, re.M)),
           "verification_log.md has no `- iter N PASS/FAIL:` entries (A4.1 Step 4)")
 
     # 2) acceptance.md — exists, first line cap/stall stop-condition (COV-7)
@@ -796,7 +826,7 @@ def main():
     # 3) screenshots cited in the log files must exist >0 bytes (A4.4)
     #    C2 (P1): + magic bytes — a 1-byte file named *.png is not evidence
     group("3")
-    for png in re.findall(r"tests/(\S+\.png)", vl + "\n" + acc):
+    for png in re.findall(r"tests/(\S+\.png)", vl + "\n" + acc, re.I):
         p = tests / png
         if not (p.exists() and p.stat().st_size > 0):
             check(False, f"screenshot claimed but missing/empty: tests/{png} (A4.4)")
@@ -968,7 +998,7 @@ def main():
     # 11) A4.1 — video/audio evidence cited in the log must exist >0 bytes (A4.1 Step 2/3)
     #     C2 (P1): + magic bytes per kind (webm/wav/mp4/mp3)
     group("11")
-    for m in re.findall(r"tests/(\S+\.(?:webm|wav|mp4|mp3))", vl):
+    for m in re.findall(r"tests/(\S+\.(?:webm|wav|mp4|mp3))", vl, re.I):
         p = tests / m
         if not (p.exists() and p.stat().st_size > 0):
             check(False, f"media evidence claimed but missing/empty: tests/{m} (A4.1)")
@@ -1008,7 +1038,7 @@ def main():
     # 14) secret scan — the change-wave diff / untracked files must not ADD
     group("14")
     #     credential-looking lines (.md warn-only; placeholder-marked exempt)
-    s14_fails, s14_warns = secret_scan(root, vl)
+    s14_fails, s14_warns = secret_scan(root, cur_block)
     for w in s14_warns:
         warn(w, "14")
     for f in s14_fails:
@@ -1016,7 +1046,7 @@ def main():
 
     # 15) test-change guard — removed test assertions need a logged reason
     group("15")
-    for f in test_change_guard(root, vl):
+    for f in test_change_guard(root, cur_block):
         check(False, f)
 
     # 15b) C3 (P1, BL-11/12): evidence manifest — tamper + freshness.
@@ -1045,7 +1075,7 @@ def main():
               "sealed evidence is STALE (C3 freshness) - wave code changed after evidence_seal.py "
               "ran; re-run the covering tests and re-seal (missing != success)")
     elif args.final:
-        _cited_media = re.findall(r"tests/(\S+\.(?:png|webm|wav|mp4|mp3))", vl)
+        _cited_media = re.findall(r"tests/(\S+\.(?:png|webm|wav|mp4|mp3))", vl, re.I)
         if _cited_media:
             check(False, f"cited media evidence is not sealed (C3) - run `python3 scripts/evidence_seal.py` "
                          f"(writes tests/evidence_manifest.json; {len(set(_cited_media))} file(s) cited)")
@@ -1082,11 +1112,11 @@ def main():
     blocks = re.split(r"(?m)^(?=## )", "\n".join(live))
     cur = ""
     for _b in blocks:
-        if re.search(r"(?m)^- iter \d+ (?:PASS|FAIL):", _b):
+        if re.search(r"(?m)^- iter \d+ (?:PASS|FAIL)\b", _b):
             cur = _b
     if cur:
-        iters = len(re.findall(r"(?m)^- iter \d+ (?:PASS|FAIL):", cur))
-        has_fail = bool(re.search(r"(?m)^- iter \d+ FAIL:", cur))
+        iters = len(re.findall(r"(?m)^- iter \d+ (?:PASS|FAIL)\b", cur))
+        has_fail = bool(re.search(r"(?m)^- iter \d+ FAIL\b", cur))
         if iters >= 2 or has_fail:
             check(bool(re.search(r"(?m)^- working-note:\s*\S", cur)),
                   "verification_log.md current task block: ≥2 iterations / a FAIL without "
