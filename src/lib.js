@@ -170,6 +170,31 @@ export function inlineCheck(root) {
   return failures
 }
 
+// ── 主线 2026-10-18 移植：turn-stopping 的正向完成判定 ──
+// 当前任务块：最后一个 Task 或 iter-bearing 块（尾部 Notes 不遮蔽）。
+export function currentLogBlock(logText) {
+  const text = typeof logText === "string" ? logText : ""
+  const blocks = text.split(/^(?=## )/m)
+  let selected = ""
+  for (const b of blocks) {
+    if (/^## Task\b/m.test(b) || /^- iter \d+ (?:PASS|FAIL)\b/m.test(b)) selected = b
+  }
+  return selected || (blocks.length ? blocks[blocks.length - 1] : text)
+}
+
+// 完成证据：`- final-run: … --final … pass=N/fail=0`（N≥1）。
+export function hasFinalRun(logText) {
+  return /-[ \t]*final-run:[^\n]*--final[^\n]*pass=[1-9]\d*[ \t]*\/[ \t]*fail=0/i.test(currentLogBlock(logText))
+}
+
+// 用户显式停止指令（否定式 "不要停/别停" 不算）。
+export function isStopDirective(text) {
+  const t = typeof text === "string" ? text : ""
+  if (!t.trim()) return false
+  if (/(?:不要|别|不能)停|don't stop|do not stop|never stop/i.test(t)) return false
+  return /(^|\s)(?:stop|cancel|quit)\b|停一下|停下来|停止吧|别做了|别再做|先到这里|到此为止|今天到这/i.test(t)
+}
+
 export function countPasses(root) {
   const log = safeRead(path.join(root, "tests", "verification_log.md"))
   return (log.match(/^- iter \d+ PASS:/gm) || []).length

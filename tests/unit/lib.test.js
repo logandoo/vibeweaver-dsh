@@ -20,6 +20,9 @@ import {
   countPasses,
   isCodingIntent,
   covenantCard,
+  currentLogBlock,
+  hasFinalRun,
+  isStopDirective,
   inlineCheck,
   checkGate,
   cueNotes,
@@ -676,6 +679,18 @@ test("covenantCard: 含 wave15-17 主线义务 token（2026-10-07 移植）", ()
   assert.ok(card.includes("组21"), "repo-hygiene/group 21 obligation")
   assert.ok(card.includes("4b"), "trigger prefix lint")
   assert.ok(Buffer.byteLength(card) < 8000, `card exceeds 8KB bytes: ${Buffer.byteLength(card)}`)
+})
+
+test("turn-stopping helpers: currentLogBlock / hasFinalRun / stop directive（2026-10-18 主线移植）", () => {
+  const old = "## Task: old\n- iter 1 PASS: x\n- final-run: --final — pass=2/fail=0\n## Verification Log — new\n- iter 2 PASS: y\n"
+  assert.ok(currentLogBlock(old).includes("iter 2 PASS"), "newer iter block wins over old Task")
+  assert.equal(hasFinalRun(old), false, "old final-run must not license the new block")
+  const done = "## Task: x\n- iter 1 PASS: y\n- final-run: --final — pass=1/fail=0\n"
+  assert.equal(hasFinalRun(done), true)
+  assert.equal(hasFinalRun("## Task: x\n- final-run: --final — pass=0/fail=0\n"), false, "pass=0 is not completion")
+  assert.equal(isStopDirective("停一下，今天到此为止"), true)
+  assert.equal(isStopDirective("不要停，继续"), false)
+  assert.equal(isStopDirective("What changed?"), false)
 })
 
 test("canonical assert: 12b/4b/19 组与 --final 旗标在位（wave16/17 同步）", () => {

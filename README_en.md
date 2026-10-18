@@ -87,8 +87,8 @@ The two 10-14 mainline waves (§A4.1.2 measure-then-judge; `scripts/ui_fidelity.
 
 - **Assert**: `tests/assert_artifacts.py` refreshed to the mainline 21-group canonical. New group 21 enforces repo hygiene: `.gitignore` committed in HEAD and covering the detected stack, no tracked vendor/cache, untracked ≤2,000, `.git` ≤1 GiB, and reachable blob ≤40 MiB at `--final`; git errors/timeouts/overflow fail closed. The dsh fixed-local patches are now adopted upstream (including the shared `FINGERPRINT_EXT` contract); `--existing` passes 48/48 after the refresh.
 - **Covenant card/lib**: COV-9 gains the group-21 hygiene preflight; the key-files group count is 1-21; `BLOCKING_HINTS` gains `repo-hygiene` (classification has been fail-closed since 2026-10-15b; the hint remains diagnostic); card is 7926B (7976B with the production default path) <8KB; `src/lib.js` → `lib/lib.js` is synced by `script/linux/project_build.sh`.
-- **Not ported**: the mainline stop-guard positive-incomplete/abort-fence lives in `vibeweaver-audit.js`; dsh has no equivalent audit plugin component, so its turn-stopping keeps the existing budget semantics (recorded in memory).
-- **Verification**: build exit 0; `node --test tests/unit/*.test.js` **70/70**; `python3 tests/assert_artifacts.py --existing` **48/48**; no in-repo A/B (standing dsh port discipline).
+- **Stop-guard**: now wired through dsh-native `agent/turn-stopping` + `agent.steer`: if `tests/acceptance.md` exists but the current task block has no `- final-run:` and a successful write/edit happened after the last user message, steer to continue; host `agent/error` / aborted turn signals fence the trigger; user Q&A is turn-scoped and does not auto-resume; the existing `steerBudget` applies. No audit-plugin component is required.
+- **Verification**: build exit 0; `node --test tests/unit/*.test.js` **73/73**; `python3 tests/assert_artifacts.py --existing` **48/48**; no in-repo A/B (standing dsh port discipline).
 
 ## 2026-10-07: mainline wave15–17 port (working memory · cue triggers · outer loop · enforcement teeth)
 

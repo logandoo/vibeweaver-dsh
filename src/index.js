@@ -1,7 +1,7 @@
 // vibeweaver-dsh 插件主入口 — dsh 0.1.0-rc.6 (Cordis)
 // 组件: skill provider / 契约段 / pre-step 激活 / post-execute 门禁 /
 //       turn-stopping 守卫 / vibeweaver_gate 工具 / /vibe 命令 / compaction 重建
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { homedir } from "node:os"
 import { fileURLToPath } from "node:url"
@@ -11,6 +11,9 @@ import {
   stallObservation,
   isCodingIntent,
   covenantCard,
+  currentLogBlock,
+  hasFinalRun,
+  isStopDirective,
   findProjectRoot,
   invalidateGateCache,
   cueNotes,
@@ -34,6 +37,11 @@ const ACTIVATION_TEXT = [
 const STEER_TEXT = [
   "[vibeweaver 守卫] 验证证据未齐：tests/assert_artifacts.py 未退出 0（见上一工具结果）。",
   "本回合不得结束——先修复证据（verification_log/acceptance/截图等落盘），再调用 vibeweaver_gate 确认，或明确向用户说明为何无法满足。",
+].join("\n")
+
+const INCOMPLETE_STEER_TEXT = [
+  "[vibeweaver 守卫] 本回合停在任务未完成状态：tests/acceptance.md 仍存在，但当前任务块没有 `- final-run: --final … pass=N/fail=0`。",
+  "本回合不得结束——运行 vibeweaver_gate 确认证据；继续修复，或写 tests/paused_state.md 并给出 [PAUSED] 包（合法停止）。不要只总结已完成的部分。",
 ].join("\n")
 
 const RECOVER_TEXT = [
@@ -61,6 +69,13 @@ export function apply(ctx, config = {}) {
   const injectedAgents = new Set()
   const steered = new Map() // key: `${sessionId}:${turn}` -> count
   const disabledSessions = new Set()
+  // turn-stopping positive-incomplete state (mainline 2026-10-18 port)
+  const lastUserAt = new Map()
+  const lastWriteAt = new Map()
+  const lastErrorAt = new Map()
+  const lastUserText = new Map()
+  const lastTurn = new Map()
+  const sessionStart = new Map()
 
   // M5: 会话结束/销毁时清扫状态
   ctx.on("agent/disposed", (payload) => {
@@ -71,6 +86,19 @@ export function apply(ctx, config = {}) {
     for (const key of steered.keys()) {
       if (key.startsWith(sessionId + ":")) steered.delete(key)
     }
+    lastUserAt.delete(sessionId)
+    lastWriteAt.delete(sessionId)
+    lastErrorAt.delete(sessionId)
+    lastUserText.delete(sessionId)
+    lastTurn.delete(sessionId)
+    sessionStart.delete(sessionId)
+  })
+
+  // Host error/abort fence: never auto-resume a turn the user just cancelled
+  // or a turn that ended on an error. A later successful write clears it.
+  ctx.on("agent/error", (payload) => {
+    const sessionId = payload?.agent?.session?.id
+    if (sessionId) lastErrorAt.set(sessionId, Date.now())
   })
 
   const gateEnabled = () => gateMode !== "off"
@@ -125,11 +153,21 @@ export function apply(ctx, config = {}) {
     if (decision?.kind !== "enter") return decision
     const agent = payload.agent
     const sessionId = agent?.session?.id
-    if (!sessionId || injectedAgents.has(sessionId)) return decision
     const userTexts = (payload.messages || [])
       .filter((m) => m.source?.kind === "user")
       .map((m) => (m.content || []).map((c) => c.text || "").join("\n"))
       .join("\n")
+    if (sessionId) {
+      const now = Date.now()
+      if (!sessionStart.has(sessionId)) sessionStart.set(sessionId, now)
+      const turn = Number.isFinite(payload.turn) ? payload.turn : 0
+      if (payload.step === 0 || lastTurn.get(sessionId) !== turn) {
+        lastUserAt.set(sessionId, now)
+        lastUserText.set(sessionId, userTexts)
+      }
+      lastTurn.set(sessionId, turn)
+    }
+    if (!sessionId || injectedAgents.has(sessionId)) return decision
     if (!isCodingIntent(userTexts)) return decision
     injectedAgents.add(sessionId)
     return {
@@ -151,6 +189,7 @@ export function apply(ctx, config = {}) {
     const filePath = exec.arguments && typeof exec.arguments.file_path === "string" ? exec.arguments.file_path : null
     const root = findProjectRoot(filePath)
     if (!root) return next()
+    if (sessionId && result?.isError !== true) lastWriteAt.set(sessionId, Date.now())
     invalidateGateCache(root) // 写操作已落盘 → 缓存失效, 本次检查重跑
     // cue 投递提升于门之上（主线 wave16）：门红时恰是「动手前先读」必须在场
     // 的时刻——block 反馈与 accept 提示两路都携带。
@@ -182,21 +221,40 @@ export function apply(ctx, config = {}) {
   ctx.on("agent/turn-stopping", (payload) => {
     if (!gateEnabled()) return
     if (process.env.VIBEWEAVER_GATE === "off") return
+    if (payload.signal?.aborted) return
     const agent = payload.agent
     const sessionId = agent?.session?.id
     if (sessionId && disabledSessions.has(sessionId)) return
     const agentCwd = agent?.session?.header?.cwd
     const root = findProjectRoot(agentCwd)
     if (!root) return
+
+    const testFile = (name) => join(root, "tests", name)
+    const started = sessionStart.get(sessionId) || 0
+    const mtimeAt = (p) => { try { return statSync(p).mtimeMs } catch { return 0 } }
+    const paused = mtimeAt(testFile("paused_state.md")) >= started && started > 0
+    const classE = mtimeAt(testFile("decisions.md")) >= started && started > 0
+      && /Class-E/i.test(readFileSync(testFile("decisions.md"), "utf8"))
+    const log = existsSync(testFile("verification_log.md")) ? readFileSync(testFile("verification_log.md"), "utf8") : ""
+    const active = existsSync(testFile("acceptance.md")) && !hasFinalRun(log)
+    const wroteAfterUser = lastWriteAt.has(sessionId)
+      && (!lastUserAt.has(sessionId) || lastWriteAt.get(sessionId) > lastUserAt.get(sessionId))
+    const errorFence = lastErrorAt.has(sessionId)
+      && (!lastWriteAt.has(sessionId) || lastErrorAt.get(sessionId) >= lastWriteAt.get(sessionId))
+    const userStop = isStopDirective(lastUserText.get(sessionId))
+    const positiveIncomplete = !!active && wroteAfterUser && !errorFence && !paused && !classE && !userStop
+
     const gate = checkGate(root)
-    if (!gate || !gate.blocking.length) return
+    const red = !!(gate && gate.blocking.length)
+    if (!red && !positiveIncomplete) return
+    const text = red ? STEER_TEXT : INCOMPLETE_STEER_TEXT
     const key = `${sessionId}:${payload.turn}`
     const count = steered.get(key) || 0
     if (count < steerBudget) {
       steered.set(key, count + 1)
-      agent.steer({ content: [{ type: "text", text: STEER_TEXT }], source: { kind: "plugin", plugin: "dsh-vibeweaver" } })
+      agent.steer({ content: [{ type: "text", text }], source: { kind: "plugin", plugin: "dsh-vibeweaver" } })
     } else {
-      ctx.logger.warn(`vibeweaver: gate RED but steer budget exhausted for ${key}, turn closing`)
+      ctx.logger.warn(`vibeweaver: gate RED/incomplete but steer budget exhausted for ${key}, turn closing`)
     }
   })
 

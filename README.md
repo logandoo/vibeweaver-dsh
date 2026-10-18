@@ -87,8 +87,8 @@ flowchart TD
 
 - **assert**：`tests/assert_artifacts.py` 刷新为主线 21 组 canonical。新增 group 21 repo-hygiene：`.gitignore` 必须在 HEAD 且覆盖当前栈、无 tracked vendor/cache、untracked ≤2,000、`.git` ≤1 GiB、`--final` reachable blob ≤40 MiB；git 错误/超时/溢出 fail-closed。dsh 既有 fixed-local 补丁已由主线上游采纳（含 `FINGERPRINT_EXT` 共享契约），刷新后 `--existing` 48/48。
 - **契约卡/lib**：COV-9 增加组 21 前置 hygiene；关键文件区组计数 1-20 → 1-21；`BLOCKING_HINTS` 增加 `repo-hygiene`（分类器本身自 2026-10-15b 起已 fail-closed，hint 仅保留诊断语义）；契约卡 7926B（生产默认路径 7976B）<8KB；`src/lib.js` → `lib/lib.js` 由 `script/linux/project_build.sh` 同步。
-- **未移植项**：主线 stop-guard 的 positive-incomplete / abort fence 属 `vibeweaver-audit.js`，dsh 无对应 audit 插件组件；本仓 turn-stopping 维持既有预算语义，已在 memory 记录。
-- **验证**：build exit 0；`node --test tests/unit/*.test.js` **70/70**；`python3 tests/assert_artifacts.py --existing` **48/48**；移植波不做本仓 A/B（dsh 既有纪律）。
+- **stop-guard**：已通过 dsh 原生 `agent/turn-stopping` + `agent.steer` 接入主线 positive-incomplete / abort-fence：acceptance 存在但当前任务块无 `- final-run:`，且本轮用户消息之后有成功 write/edit → steer 继续；host `agent/error` / turn abort signal 会 fence；用户 Q&A 因 turn-scoped 时间戳不 auto-resume；复用既有 steerBudget。无需 audit 插件组件。
+- **验证**：build exit 0；`node --test tests/unit/*.test.js` **73/73**；`python3 tests/assert_artifacts.py --existing` **48/48**；移植波不做本仓 A/B（dsh 既有纪律）。
 
 ## 2026-10-07：主线 wave15–17 移植（工作记忆 · cue 触发 · 外层循环 · 执行层牙齿）
 

@@ -203,6 +203,75 @@ test("post-execute 门禁: 非 active 项目→next() 放行", async () => {
   rmSync(root, { recursive: true, force: true })
 })
 
+test("turn-stopping: gate GREEN + 无 final-run + 本轮写入 → positive-incomplete steer", async () => {
+  const root = makeActiveProject(false)
+  ctx = makeCtx()
+  apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
+  const agent = makeAgent("s1", root)
+  ctx.agents._register("s1", agent)
+  const signal = new AbortController().signal
+  const msg = (text) => ({ content: [{ type: "text", text }], source: { kind: "user" } })
+  await ctx.fire("agent/pre-step", { agent, messages: [msg("实现登录功能")], turn: 1, step: 0, signal }, () => ({ kind: "enter", messages: [] }))
+  await new Promise((r) => setTimeout(r, 5))
+  const exec = { name: "write", arguments: { file_path: join(root, "src", "a.js") }, agent }
+  const result = { isError: false, content: [], value: {} }
+  await ctx.fire("tools/post-execute", exec, result, () => ({ kind: "accept", content: [] }))
+  await ctx.fire("agent/turn-stopping", { agent, turn: 1, signal }, () => {})
+  assert.equal(ctx.steered.length, 1, "no final-run after a write must steer")
+  assert.ok(ctx.steered[0].msg.content[0].text.includes("final-run"), "steer names the final-run gap")
+  // A completed final-run suppresses the positive leg.
+  writeFileSync(join(root, "tests", "verification_log.md"),
+    "## Task\n- iter 1 PASS: x\n- final-run: --final — pass=1/fail=0\n")
+  await ctx.fire("agent/turn-stopping", { agent, turn: 2, signal }, () => {})
+  assert.equal(ctx.steered.length, 1, "final-run must suppress positive steer")
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("turn-stopping: host error / abort fences positive-incomplete; user Q&A is turn-scoped", async () => {
+  const root = makeActiveProject(false)
+  ctx = makeCtx()
+  apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
+  const agent = makeAgent("s1", root)
+  ctx.agents._register("s1", agent)
+  const signal = new AbortController().signal
+  const msg = (text) => ({ content: [{ type: "text", text }], source: { kind: "user" } })
+  await ctx.fire("agent/pre-step", { agent, messages: [msg("实现功能")], turn: 1, step: 0, signal }, () => ({ kind: "enter", messages: [] }))
+  await new Promise((r) => setTimeout(r, 5))
+  const exec = { name: "write", arguments: { file_path: join(root, "src", "a.js") }, agent }
+  await ctx.fire("tools/post-execute", exec, { isError: false, content: [], value: {} }, () => ({ kind: "accept", content: [] }))
+  // Host error after write fences all triggers.
+  ctx.emit("agent/error", { agent, turn: 1, step: 1, error: new Error("aborted") })
+  await ctx.fire("agent/turn-stopping", { agent, turn: 1, signal }, () => {})
+  assert.equal(ctx.steered.length, 0, "error fence must suppress")
+  // Aborted turn signal suppresses too (fresh context/agent).
+  const root2 = makeActiveProject(false)
+  ctx = makeCtx()
+  apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
+  const agent2 = makeAgent("s2", root2)
+  ctx.agents._register("s2", agent2)
+  await ctx.fire("agent/pre-step", { agent: agent2, messages: [msg("实现功能")], turn: 1, step: 0, signal }, () => ({ kind: "enter", messages: [] }))
+  await new Promise((r) => setTimeout(r, 5))
+  await ctx.fire("tools/post-execute", { name: "write", arguments: { file_path: join(root2, "src", "a.js") }, agent: agent2 }, { isError: false, content: [], value: {} }, () => ({ kind: "accept", content: [] }))
+  const aborted = new AbortController(); aborted.abort()
+  await ctx.fire("agent/turn-stopping", { agent: agent2, turn: 1, signal: aborted.signal }, () => {})
+  assert.equal(ctx.steered.length, 0, "aborted signal must suppress")
+  // User Q&A after the write is not auto-resumed.
+  const root3 = makeActiveProject(false)
+  ctx = makeCtx()
+  apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
+  const agent3 = makeAgent("s3", root3)
+  ctx.agents._register("s3", agent3)
+  await ctx.fire("agent/pre-step", { agent: agent3, messages: [msg("实现功能")], turn: 1, step: 0, signal }, () => ({ kind: "enter", messages: [] }))
+  await new Promise((r) => setTimeout(r, 5))
+  await ctx.fire("tools/post-execute", { name: "write", arguments: { file_path: join(root3, "src", "a.js") }, agent: agent3 }, { isError: false, content: [], value: {} }, () => ({ kind: "accept", content: [] }))
+  await ctx.fire("agent/pre-step", { agent: agent3, messages: [msg("What changed?")], turn: 2, step: 0, signal }, () => ({ kind: "enter", messages: [] }))
+  await ctx.fire("agent/turn-stopping", { agent: agent3, turn: 2, signal }, () => {})
+  assert.equal(ctx.steered.length, 0, "user Q&A after write must not auto-resume")
+  rmSync(root, { recursive: true, force: true })
+  rmSync(root2, { recursive: true, force: true })
+  rmSync(root3, { recursive: true, force: true })
+})
+
 test("turn-stopping: gate RED → steer 拦截（budget 内）; 超预算放行", async () => {
   const root = makeActiveProject(true)
   ctx = makeCtx()
