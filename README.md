@@ -83,6 +83,13 @@ flowchart TD
 - **顺带清偿**：assert `--existing` 32/32、`--final` 33/33 exit 0（基线预存 group-20 失败由本波新块修复；另 2026-08-19 一条遗留行 diagnosis 扩为实质从句以满足 wave16 12b lint，语义保留并注明）。
 - **验证**：单测 66→69（新 pin：卡锚词+双配置字节帽、脚本词面+行为锚、lib 镜像）；`project_build.sh` exit 0 且 lib==src。
 
+## 2026-10-18：主线 repo-hygiene / 21 组 assert / bounded-gate 契约移植
+
+- **assert**：`tests/assert_artifacts.py` 刷新为主线 21 组 canonical。新增 group 21 repo-hygiene：`.gitignore` 必须在 HEAD 且覆盖当前栈、无 tracked vendor/cache、untracked ≤2,000、`.git` ≤1 GiB、`--final` reachable blob ≤40 MiB；git 错误/超时/溢出 fail-closed。dsh 既有 fixed-local 补丁已由主线上游采纳（含 `FINGERPRINT_EXT` 共享契约），刷新后 `--existing` 48/48。
+- **契约卡/lib**：COV-9 增加组 21 前置 hygiene；关键文件区组计数 1-20 → 1-21；`BLOCKING_HINTS` 增加 `repo-hygiene`（分类器本身自 2026-10-15b 起已 fail-closed，hint 仅保留诊断语义）；契约卡 7926B（生产默认路径 7976B）<8KB；`src/lib.js` → `lib/lib.js` 由 `script/linux/project_build.sh` 同步。
+- **未移植项**：主线 stop-guard 的 positive-incomplete / abort fence 属 `vibeweaver-audit.js`，dsh 无对应 audit 插件组件；本仓 turn-stopping 维持既有预算语义，已在 memory 记录。
+- **验证**：build exit 0；`node --test tests/unit/*.test.js` **70/70**；`python3 tests/assert_artifacts.py --existing` **48/48**；移植波不做本仓 A/B（dsh 既有纪律）。
+
 ## 2026-10-07：主线 wave15–17 移植（工作记忆 · cue 触发 · 外层循环 · 执行层牙齿）
 
 主线三波（C8 外层循环；§A7.15 任务级工作记忆 + §A7.16 cue 锚定触发 + 12b 日志 lint + group 19/`--final`；stall latch + audit B12 + 4b trigger 前缀 lint + backlog_check.py）按既有移植纪律落地：

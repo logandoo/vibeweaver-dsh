@@ -83,6 +83,13 @@ The two 10-14 mainline waves (§A4.1.2 measure-then-judge; `scripts/ui_fidelity.
 - **Incidental debt cleared**: assert `--existing` 32/32 and `--final` 33/33 exit 0 (the baseline group-20 pre-existing failure is cured by this wave's new log block; one 2026-08-19 legacy diagnosis line was expanded to a substantive clause to satisfy the later wave16 12b lint — meaning preserved and annotated).
 - **Verification**: unit 66→69 (new pins: card anchors + dual-config byte caps; script word + behavior anchors; lib mirror); `project_build.sh` exit 0 with lib==src.
 
+## 2026-10-18: mainline repo-hygiene / 21-group assert / bounded-gate port
+
+- **Assert**: `tests/assert_artifacts.py` refreshed to the mainline 21-group canonical. New group 21 enforces repo hygiene: `.gitignore` committed in HEAD and covering the detected stack, no tracked vendor/cache, untracked ≤2,000, `.git` ≤1 GiB, and reachable blob ≤40 MiB at `--final`; git errors/timeouts/overflow fail closed. The dsh fixed-local patches are now adopted upstream (including the shared `FINGERPRINT_EXT` contract); `--existing` passes 48/48 after the refresh.
+- **Covenant card/lib**: COV-9 gains the group-21 hygiene preflight; the key-files group count is 1-21; `BLOCKING_HINTS` gains `repo-hygiene` (classification has been fail-closed since 2026-10-15b; the hint remains diagnostic); card is 7926B (7976B with the production default path) <8KB; `src/lib.js` → `lib/lib.js` is synced by `script/linux/project_build.sh`.
+- **Not ported**: the mainline stop-guard positive-incomplete/abort-fence lives in `vibeweaver-audit.js`; dsh has no equivalent audit plugin component, so its turn-stopping keeps the existing budget semantics (recorded in memory).
+- **Verification**: build exit 0; `node --test tests/unit/*.test.js` **70/70**; `python3 tests/assert_artifacts.py --existing` **48/48**; no in-repo A/B (standing dsh port discipline).
+
 ## 2026-10-07: mainline wave15–17 port (working memory · cue triggers · outer loop · enforcement teeth)
 
 Three mainline waves ported under the standing discipline (C8 backlog outer loop; §A7.15 task working memory + §A7.16 cue-anchored triggers + 12b log lint + group 19/`--final`; stall latch + audit B12 + 4b trigger-prefix lint + backlog_check.py):

@@ -1,6 +1,6 @@
 """G-DED artifact assertions — byte-level check of verification claims.
 Canonical copy: vibeweaver skill `scripts/assert_artifacts.py`.
-Mirrors COMPLETION_GATE.md §A4.4.1 minimum-check table (groups 1-19).
+Mirrors COMPLETION_GATE.md §A4.4.1 minimum-check table (groups 1-21).
 Group 12 enforces the A4.1 diagnosis clause; group 13 is a
 claim-without-scope lint (approach modeled on J-Space Cognition Suite's
 `ship` check at idea level; implementation here is original —
@@ -13,11 +13,41 @@ a profile never weakens an applicable group. `--class DOC|CONFIG|CODE`
 (COV-13 / §V11, or the log's `- class:` basis line) N/A's the memory (4)
 and service-lifecycle (5) groups for the classes whose path card has no
 such risk."""
-import argparse, hashlib, json, os, pathlib, re, subprocess, sys
+import argparse, hashlib, json, os, pathlib, re, shutil, subprocess, sys
+
+# Deterministic output encoding (2026-10-17 windows/CI): the locale encoding
+# is cp1252/ascii on non-UTF-8 systems while every evidence string here is
+# UTF-8 — `print` raised UnicodeEncodeError mid-run (the A4 "assert failed"
+# class), and child-output decoding raised UnicodeDecodeError in reader
+# threads. Consumers (gate/audit plugin, node harness) decode our stdout as
+# UTF-8. errors="replace": the checker must never die on odd bytes.
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
 FAILS = []   # [{"code","severity","detail"}] — machine-readable per D4 (--json)
 WARN_LINES = []
 CUR_GROUP = "misc"
+UNTRACKED_LIMIT = 2000      # path-count ceiling: the incident's 45k pnpm files
+UNTRACKED_TOTAL = 0
+WAVE_TOO_LARGE = ""         # non-empty = refuse to materialize the wave diff
+WAVE_CACHE = {}
+GIT_SIZE_WARN_KIB = 200 * 1024
+GIT_SIZE_FAIL_KIB = 1024 * 1024
+BLOB_WARN = 10 * 1024 * 1024
+BLOB_FAIL = 40 * 1024 * 1024
+VENDOR_RE = re.compile(
+    r"(^|/)(?:node_modules|\.pnpm-store|\.venv|venv|site-packages|"
+    r"__pycache__|\.next|\.nuxt|coverage|ms-playwright|playwright-report|"
+    r"test-results)(?:/|$)")
+BUILD_RE = re.compile(r"(^|/)(?:dist|build|target|\.yarn/cache)(?:/|$)")
+SECRET_NAME_RE = re.compile(r"(^\.env($|\.)|\.(pem|key|crt)$|^config\.local\.)")
+NODE_MANIFESTS = ("package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml",
+                  "yarn.lock", "package-lock.json")
+PY_MANIFESTS = ("requirements.txt", "pyproject.toml", "Pipfile",
+                "poetry.lock", "setup.py")
 
 
 def group(code: str):
@@ -29,6 +59,7 @@ def warn(msg: str, code: str = ""):
     WARN_LINES.append({"code": code or CUR_GROUP, "detail": msg})
 PASSES = 0
 GIT_TIMEOUT = False
+UNTRACKED_ERROR = 0
 
 # Group 13 word sets, chosen for what vibeweaver logs actually overclaim with.
 # CLAIM  — verbs that assert a verification result happened.
@@ -63,7 +94,9 @@ CODE_EXT = {".py", ".js", ".ts", ".tsx", ".jsx", ".mjs", ".go", ".rs",
 SECRET_RES = [
     re.compile(r"AKIA[0-9A-Z]{16}"),                       # AWS access key id
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
-    re.compile(r"ghp_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,}|"
+    re.compile(r"AIza[0-9A-Za-z_-]{35}"),                  # Google API key
+    re.compile(r"eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"),
+    re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
                r"xox[baprs]-[A-Za-z0-9-]{16,}|"
                # C3c rule-table parity with scripts/scan_secrets.py: the
                # lookbehind keeps `disk-usage-…`/`task-…` from matching
@@ -76,9 +109,10 @@ SECRET_RES = [
 # never flagged. Values outside the base charset (spaces, !#%…) may
 # escape — documented tradeoff, biased against false-blocking.
 GENERIC_KV = re.compile(
-    r"(?i)\b(?:api[_-]?key|apikey|secret|password|passwd|pwd|token|"
-    r"private[_-]?key|access[_-]?key)\b[\"']?\s*[:=]\s*"
-    r"(?P<q>[\"']?)(?P<v>[A-Za-z0-9_/+.\-]{12,})")
+    r"(?i)(?<![A-Za-z0-9])(?:[A-Za-z0-9]{1,32}[_-]){0,4}"
+    r"(?:api[_-]?key|apikey|secret|password|passwd|pwd|token|"
+    r"private[_-]?key|access[_-]?key)(?:[_-][A-Za-z0-9]{1,32}){0,4}"
+    r"[\"']?\s*[:=]\s*(?P<q>[\"']?)(?P<v>[A-Za-z0-9_/+.\-]{12,})")
 PLACEHOLDER = re.compile(r"(?i)example|sample|dummy|placeholder|changeme|"
                          r"redacted|fake|<[^>]+>")
 ASSERT_LINE = re.compile(r"^\s*(?:assert\b|self\.assert|expect\s*\(|"
@@ -93,7 +127,7 @@ def _git(root, *args):
     global GIT_TIMEOUT
     try:
         r = subprocess.run(["git", "-C", str(root), *args],
-                           capture_output=True, text=True, timeout=20)
+                           capture_output=True, encoding="utf-8", errors="replace", timeout=20)
         return r.returncode, r.stdout
     except FileNotFoundError:
         return -1, ""
@@ -131,31 +165,128 @@ def _unquote_git(p: str) -> str:
     return out.decode("utf-8", "replace")
 
 
+def _wave_paths(root, base):
+    """Path list for the change wave — cheap preflight before `git log -p`."""
+    paths = set()
+    if base:
+        rc, out = _git(root, "log", "--name-only", "--format=", f"{base}..HEAD")
+    else:
+        rc, out = _git(root, "show", "--name-only", "--format=", "HEAD")
+    if rc == 0:
+        paths.update(l for l in out.splitlines() if l.strip())
+    for args in (["diff", "--name-only", "HEAD"],
+                 ["diff", "--cached", "--name-only"]):
+        rc, out = _git(root, *args)
+        if rc == 0:
+            paths.update(l for l in out.splitlines() if l.strip())
+    return paths
+
+
 def wave_diff_text(root):
     """Change-wave diff: PER-COMMIT patches of newest `backup: before changes`
     commit..HEAD (a net range diff would hide intra-wave add-then-remove),
-    else `git show HEAD`; plus uncommitted `git diff HEAD`. "" = no git repo."""
+    else `git show HEAD`; plus uncommitted `git diff HEAD`. "" = no git repo.
+
+    Bounded by PATH COUNT before materializing patches (2026-10-18 incident:
+    45k pnpm paths / 1.3GB wave -> OOM). A too-large wave is a hard failure,
+    not a silently empty diff."""
+    global WAVE_TOO_LARGE
+    key = str(root)
+    if key in WAVE_CACHE:
+        return WAVE_CACHE[key]
     rc, _ = _git(root, "rev-parse", "--git-dir")
     if rc != 0:
+        WAVE_CACHE[key] = ""
         return ""
     rc, sha = _git(root, "log", "--format=%H", "-1", "--fixed-strings",
                    "--grep=backup: before changes")
+    base = sha.strip() if rc == 0 and sha.strip() else ""
+    paths = _wave_paths(root, base)
+    if len(paths) > UNTRACKED_LIMIT:
+        WAVE_TOO_LARGE = f"{len(paths)} paths > {UNTRACKED_LIMIT}"
+        WAVE_CACHE[key] = ""
+        return ""
     parts = []
-    if rc == 0 and sha.strip():
-        _, d = _git(root, "log", "-p", "--format=", f"{sha.strip()}..HEAD")
+    if base:
+        _, d = _git(root, "log", "-p", "--format=", f"{base}..HEAD")
         parts.append(d)
     else:
         _, d = _git(root, "show", "--format=", "HEAD")
         parts.append(d)
     _, d = _git(root, "diff", "HEAD")
     parts.append(d)
-    return "\n".join(parts)
+    text = "\n".join(parts)
+    if len(text.encode("utf-8", "replace")) > 16 * 1024 * 1024:
+        WAVE_TOO_LARGE = f"diff {len(text)} bytes > 16 MiB"
+        text = ""
+    WAVE_CACHE[key] = text
+    return text
 
 
 def untracked_files(root):
-    """Untracked, non-gitignored files (never visible in git diff)."""
+    """Untracked, non-gitignored files (never visible in git diff).
+
+    Returns at most UNTRACKED_LIMIT paths; UNTRACKED_TOTAL preserves the real
+    count so group 21 can fail fast instead of walking a 45k-file tree."""
+    global UNTRACKED_TOTAL, UNTRACKED_ERROR
     rc, out = _git(root, "ls-files", "--others", "--exclude-standard")
-    return [_unquote_git(l) for l in out.splitlines() if l.strip()] if rc == 0 else []
+    if rc != 0:
+        UNTRACKED_ERROR = rc
+        return []
+    UNTRACKED_ERROR = 0
+    lines = [_unquote_git(l) for l in out.splitlines() if l.strip()]
+    # Keep the MAX observed count: a later transient failure/empty result must
+    # not erase an earlier flood observation.
+    UNTRACKED_TOTAL = max(UNTRACKED_TOTAL, len(lines))
+    return lines[:UNTRACKED_LIMIT]
+
+
+def non_git_text_files(root, limit=2000):
+    """Bounded source/config walk for non-git projects (group 14 fallback)."""
+    out = []
+    skip = {".git", ".vibeweaver", "node_modules", ".pnpm-store", ".venv",
+            "venv", "site-packages", "__pycache__", "dist", "build", "target",
+            "coverage", ".next", ".nuxt", ".cache", "Library",
+            "ms-playwright", "playwright-report", "test-results"}
+    exts = CODE_EXT | {".env", ".pem", ".key", ".crt", ".json", ".toml",
+                       ".yaml", ".yml", ".ini", ".cfg", ".txt"}
+    try:
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d not in skip]
+            for name in filenames:
+                p = pathlib.Path(dirpath) / name
+                if p.suffix in exts or SECRET_NAME_RE.search(name):
+                    out.append(str(p.relative_to(root)))
+                    if len(out) >= limit:
+                        return out
+    except OSError:
+        pass
+    return out
+
+
+def ignored_secret_files(root):
+    """Ignored files whose NAME is a secret carrier (`.env*`, keys, certs).
+    `.gitignore` is prevention, not a blindfold — group 14 must still scan
+    these, while dependency/build caches stay excluded."""
+    out = []
+    skip = {".git", ".vibeweaver", "node_modules", ".pnpm-store", ".venv",
+            "venv", "site-packages", "__pycache__", "dist", "build", "target",
+            "coverage", ".next", ".nuxt", ".cache", "Library",
+            "ms-playwright", "playwright-report", "test-results"}
+    try:
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d not in skip]
+            for name in filenames:
+                if SECRET_NAME_RE.search(name):
+                    p = pathlib.Path(dirpath) / name
+                    try:
+                        if p.is_file() and p.stat().st_size <= 1_000_000:
+                            out.append(str(p.relative_to(root)))
+                    except OSError:
+                        pass
+    except OSError:
+        pass
+    return out
 
 
 HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
@@ -240,7 +371,12 @@ def secret_scan(root, vl=""):  # vl = CURRENT task block (approval scoping)
     for path, (added, _r) in parse_diff(wave_diff_text(root)).items():
         for lineno, l in added:
             hit(path, lineno, l)
-    for rel in untracked_files(root):
+    approved_files = set(re.findall(r"^- secret-approved:\s*(\S+)\s+—", vl, re.M))
+    ignored = [p for p in ignored_secret_files(root) if p not in approved_files]
+    rc_git, _ = _git(root, "rev-parse", "--git-dir")
+    fallback = non_git_text_files(root) if rc_git != 0 else []
+    scan_paths = list(dict.fromkeys(untracked_files(root) + ignored + fallback))
+    for rel in scan_paths:
         p = root / rel
         try:
             if not p.is_file() or p.stat().st_size > 1_000_000:
@@ -453,28 +589,88 @@ def png_dims(path: pathlib.Path):
         return None
 
 
+_BASH_EXE = None
+_BASH_PROBED = False
+
+
+def _bash_exe():
+    """Resolve a WORKING bash, once per process (2026-10-17, windows CI):
+    `subprocess.run(["bash"], ...)` resolves `bash` to the System32 WSL stub
+    before Git Bash — the stub exits non-zero with EMPTY stderr when no WSL
+    distro is registered, which looked like "bash -n failed" on every .sh.
+    Probe candidates with `bash -c 'exit 0'` and fall back to the standard
+    Git for Windows paths; VIBEWEAVER_BASH overrides. None = no parser
+    (fail-closed at the call site)."""
+    global _BASH_EXE, _BASH_PROBED
+    if _BASH_PROBED:
+        return _BASH_EXE
+    _BASH_PROBED = True
+    cands = []
+    if os.environ.get("VIBEWEAVER_BASH"):
+        cands.append(os.environ["VIBEWEAVER_BASH"])
+    w = shutil.which("bash")
+    if w:
+        cands.append(w)
+    if os.name == "nt":
+        cands += [
+            r"C:\Program Files\Git\bin\bash.exe",
+            r"C:\Program Files\Git\usr\bin\bash.exe",
+            r"C:\Program Files (x86)\Git\bin\bash.exe",
+        ]
+    for c in cands:
+        if not c or not os.path.isfile(c):
+            continue
+        try:
+            if subprocess.run([c, "-c", "exit 0"], capture_output=True, timeout=10).returncode == 0:
+                _BASH_EXE = c
+                return c
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+    return None
+
+
 def script_syntax_check(path: pathlib.Path):
     """C2: a delivered script must be runnable syntax — non-empty, shebang for
     shell, then the parser: `bash -n` (.sh), `node --check` (.js/.mjs),
-    py_compile (.py). Returns (ok, detail)."""
+    py_compile (.py). Returns (ok, detail).
+    Portability (2026-10-17): the shell parser reads the content from STDIN
+    with BOM/CRLF normalized — the verdict is about the script's SYNTAX, not
+    git's checkout line-ending policy, and a Windows `bash` opening a
+    backslash path is not portable across runners (windows-latest failed
+    every .sh with an empty-stderr `bash -n` while the same bytes parsed
+    clean elsewhere)."""
     try:
-        if path.stat().st_size == 0:
-            return False, "empty script (0 bytes)"
-        first = path.read_text(errors="replace").splitlines()[0] if path.stat().st_size else ""
+        raw = path.read_bytes()
     except OSError as exc:
         return False, f"unreadable ({exc})"
+    if not raw:
+        return False, "empty script (0 bytes)"
+    text = raw.decode("utf-8", errors="replace").lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+    first = text.splitlines()[0] if text else ""
     ext = path.suffix.lower()
     if ext in (".sh", ".bash") and not first.startswith("#!"):
         return False, "missing shebang"
     try:
         if ext in (".sh", ".bash"):
-            r = subprocess.run(["bash", "-n", str(path)], capture_output=True, text=True, timeout=10)
-            return r.returncode == 0, ("syntax ok" if r.returncode == 0 else (r.stderr.strip() or "bash -n failed")[:120])
+            # CRLF is its own verdict (ShellCheck SC1017 = error): a CRLF
+            # script is not runnable at the execution host — the parser below
+            # sees normalized text so "syntax" and "line endings" stay
+            # independent judgments. Raw bytes carry the truth (text is
+            # normalized below's parser input).
+            if b"\r" in raw:
+                return False, ("CRLF/CR line endings (SC1017) — run `tr -d '\\r' <in >out` or dos2unix; "
+                               "prevent with .gitattributes `*.sh text eol=lf`")
+            exe = _bash_exe()
+            if not exe:
+                return False, "checker unavailable (no working bash on PATH)"
+            r = subprocess.run([exe, "-n"], input=text, capture_output=True, encoding="utf-8", errors="replace", timeout=10)
+            detail = r.stderr.strip() or f"bash -n failed (rc={r.returncode} via {os.path.basename(str(exe))})"
+            return r.returncode == 0, ("syntax ok" if r.returncode == 0 else detail[:120])
         if ext in (".js", ".mjs"):
-            r = subprocess.run(["node", "--check", str(path)], capture_output=True, text=True, timeout=10)
+            r = subprocess.run(["node", "--check", str(path)], capture_output=True, encoding="utf-8", errors="replace", timeout=10)
             return r.returncode == 0, ("syntax ok" if r.returncode == 0 else (r.stderr.strip() or "node --check failed")[:120])
         if ext == ".py":
-            r = subprocess.run([sys.executable, "-m", "py_compile", str(path)], capture_output=True, text=True, timeout=10)
+            r = subprocess.run([sys.executable, "-m", "py_compile", str(path)], capture_output=True, encoding="utf-8", errors="replace", timeout=10)
             return r.returncode == 0, ("syntax ok" if r.returncode == 0 else (r.stderr.strip() or "py_compile failed")[:120])
     except (OSError, subprocess.TimeoutExpired) as exc:
         return False, f"checker unavailable ({exc})"
@@ -514,6 +710,176 @@ def claim_without_coverage(vl: str):
         if CLAIM.search(stripped) and not COVER.search(stripped):
             hits.append((i, stripped[:80]))
     return hits
+
+
+def _manifest_dirs(root: pathlib.Path, names):
+    """Manifest directories up to depth 3 — monorepo `services/api/` too."""
+    dirs = []
+    skip = {".git", ".venv", "venv", "node_modules", ".pnpm-store", "dist",
+            "build", "target", "coverage", ".next", ".nuxt", "site-packages",
+            "__pycache__", "ms-playwright", "playwright-report", "test-results",
+            "tests", "fixtures", "examples", "vendor"}
+    try:
+        for dirpath, dirnames, _filenames in os.walk(root):
+            rel = pathlib.Path(dirpath).relative_to(root)
+            if len(rel.parts) > 3:
+                dirnames[:] = []
+                continue
+            dirnames[:] = [d for d in dirnames
+                           if d not in skip and not d.startswith(".")]
+            if any((pathlib.Path(dirpath) / n).exists() for n in names):
+                dirs.append(pathlib.Path(dirpath))
+    except OSError:
+        pass
+    return dirs
+
+
+def _ignored(root: pathlib.Path, rel: str) -> bool:
+    """True only when a COMMITTED .gitignore supplies the match.
+
+    `check-ignore -q` alone would accept a global excludes file or
+    `.git/info/exclude`, leaving collaborators/CI unprotected."""
+    rc, out = _git(root, "check-ignore", "-v", "--no-index", rel)
+    if rc != 0:
+        return False
+    src = out.split(":", 1)[0].strip()
+    if not src.endswith(".gitignore") or src.startswith("/") or "/.git/" in src:
+        return False
+    # The matching .gitignore must be COMMITTED (HEAD), so the protection
+    # travels with the repo; a staged-only, nested-untracked, or global
+    # excludes file named `.gitignore` does not count.
+    rc2, _ = _git(root, "cat-file", "-e", f"HEAD:{src}")
+    if rc2 != 0:
+        return False
+    # The matching PATTERN must be committed too: an uncommitted `.gitignore`
+    # edit is local-only protection (the incident can recur on a fresh clone).
+    rc3, _ = _git(root, "diff", "--quiet", "HEAD", "--", src)
+    return rc3 == 0
+
+
+def repo_hygiene_check(root: pathlib.Path, existing: bool, final: bool):
+    """Group 21 — repository hygiene / VCS budget (COV-9 preflight, A10.1).
+
+    The incident class: one `git add -A` committed a pnpm store + browser
+    cache + SQL dumps (~1.3GB); a later `git rm --cached` did not shrink the
+    history. This gate fails BEFORE that state becomes the baseline."""
+    rc, _ = _git(root, "rev-parse", "--git-dir")
+    if rc != 0:
+        if rc in (-2, -3):
+            check(False, "repo-hygiene: git call timed out/overflowed — cannot verify the repository (fail-closed; re-run)")
+        elif (root / ".git").exists():
+            check(False, "repo-hygiene: git command failed inside an existing .git — cannot verify (fail-closed)")
+        elif existing:
+            check(True, "repo-hygiene: na (no git repo)")
+        else:
+            check(False, "new-project git repo missing — run `git init` first (C1 step 1)")
+        return
+
+    check((root / ".gitignore").is_file(),
+          "repo-hygiene: .gitignore missing — write it BEFORE installing dependencies (A10.1/APPENDIX §A12)")
+    rc, _ = _git(root, "cat-file", "-e", "HEAD:.gitignore")
+    check(rc == 0,
+          "repo-hygiene: .gitignore is not committed in HEAD — commit it so collaborators/CI get the protection")
+
+    node_dirs = _manifest_dirs(root, NODE_MANIFESTS)
+    pnpm_dirs = _manifest_dirs(root, ("pnpm-lock.yaml", "pnpm-workspace.yaml"))
+    py_dirs = _manifest_dirs(root, PY_MANIFESTS)
+    if node_dirs:
+        missing = []
+        for d in node_dirs:
+            rel = (d / "node_modules/probe").relative_to(root).as_posix()
+            if not _ignored(root, rel):
+                missing.append(rel)
+        check(not missing,
+              "repo-hygiene: .gitignore does not cover node_modules/ at: "
+              + ", ".join(missing[:3]) + (" …" if len(missing) > 3 else "")
+              + " — `git add -A` would sweep dependencies into history")
+    if pnpm_dirs:
+        missing = []
+        for d in pnpm_dirs:
+            rel = (d / ".pnpm-store/probe").relative_to(root).as_posix()
+            if not _ignored(root, rel) and not _ignored(root, ".pnpm-store/probe"):
+                missing.append(rel)
+        check(not missing,
+              "repo-hygiene: .gitignore does not cover .pnpm-store/ at: "
+              + ", ".join(missing[:3]) + (" …" if len(missing) > 3 else "")
+              + " — the 886MB incident path")
+    if py_dirs:
+        missing = []
+        for d in py_dirs:
+            rel_venv = (d / ".venv/probe").relative_to(root).as_posix()
+            rel_venv2 = (d / "venv/probe").relative_to(root).as_posix()
+            if not (_ignored(root, rel_venv) or _ignored(root, rel_venv2)):
+                missing.append(rel_venv)
+        check(not missing,
+              "repo-hygiene: .gitignore does not cover .venv/ or venv/ at: "
+              + ", ".join(missing[:3]) + (" …" if len(missing) > 3 else "")
+              + " — Python deps are not source")
+
+    rc, out = _git(root, "ls-files")
+    if rc != 0:
+        check(False, "repo-hygiene: git ls-files failed — cannot verify tracked paths (fail-closed)")
+        tracked = []
+    else:
+        tracked = [l for l in out.splitlines() if l.strip()]
+    bad = [p for p in tracked if VENDOR_RE.search(p)]
+    check(not bad,
+          "repo-hygiene: tracked vendor/cache path(s): " + ", ".join(bad[:3])
+          + (" …" if len(bad) > 3 else "")
+          + " — `git rm -r --cached` them, then commit .gitignore (index-only cleanup does NOT shrink .git)")
+    built = [p for p in tracked if BUILD_RE.search(p)]
+    if built:
+        warn("repo-hygiene: tracked build output(s): " + ", ".join(built[:3])
+             + (" …" if len(built) > 3 else "") + " — verify these are not generated (A10.1)", "21")
+
+    check(UNTRACKED_ERROR == 0,
+          "repo-hygiene: git ls-files --others failed — cannot verify the untracked count (fail-closed)")
+    if UNTRACKED_TOTAL > 500:
+        warn(f"repo-hygiene: {UNTRACKED_TOTAL} untracked non-ignored files (> 500) — likely a missing ignore rule", "21")
+    check(UNTRACKED_TOTAL <= UNTRACKED_LIMIT,
+          f"repo-hygiene: {UNTRACKED_TOTAL} untracked non-ignored files > {UNTRACKED_LIMIT} — fix .gitignore or split the wave; refusing to scan the tree")
+
+    rc, out = _git(root, "count-objects", "-v")
+    size_kib = 0
+    if rc != 0:
+        check(False, "repo-hygiene: git count-objects failed — cannot verify .git size (fail-closed)")
+    else:
+        for line in out.splitlines():
+            m = re.match(r"^(?:size|size-pack):\s*(\d+)", line)
+            if m:
+                size_kib += int(m.group(1))
+    check(size_kib <= GIT_SIZE_FAIL_KIB,
+          f"repo-hygiene: .git is {size_kib / 1024:.0f} MiB > 1 GiB — history is contaminated; run the A10.1 filter-repo runbook (Class-E, backup first)")
+    if size_kib > GIT_SIZE_WARN_KIB:
+        warn(f"repo-hygiene: .git is {size_kib / 1024:.0f} MiB (> 200 MiB) — schedule the A10.1 history audit", "21")
+
+    if final:
+        rc, out = _git(root, "rev-list", "--objects", "--all")
+        reachable = set()
+        if rc == 0:
+            reachable = {line.split(" ", 1)[0] for line in out.splitlines() if line.strip()}
+        rc2, out2 = _git(root, "cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)",
+                         "--batch-all-objects")
+        max_blob = 0
+        if rc != 0 or rc2 != 0:
+            check(False, "repo-hygiene: git rev-list/cat-file failed — cannot verify the largest reachable blob (fail-closed)")
+        else:
+            for line in out2.splitlines():
+                parts = line.split()
+                if len(parts) == 3 and parts[1] == "blob" and parts[0] in reachable:
+                    try:
+                        max_blob = max(max_blob, int(parts[2]))
+                    except ValueError:
+                        pass
+        check(max_blob <= BLOB_FAIL,
+              f"repo-hygiene: largest blob {max_blob / 1024 / 1024:.1f} MiB > 40 MiB — move it to LFS/releases and rewrite history (A10.1)")
+        if max_blob > BLOB_WARN:
+            warn(f"repo-hygiene: largest blob {max_blob / 1024 / 1024:.1f} MiB (> 10 MiB) — audit before the next wave", "21")
+
+    check(not GIT_TIMEOUT,
+          "repo-hygiene: a git call timed out — cannot fully verify the repository (fail-closed; re-run)")
+    if WAVE_TOO_LARGE:
+        check(False, f"repo-hygiene: change wave too large ({WAVE_TOO_LARGE}) — split the wave before verification")
 
 
 def main():
@@ -616,7 +982,8 @@ def main():
                 _live.append(_l)
         _cur = ""
         for _b in re.split(r"(?m)^(?=## )", "\n".join(_live)):
-            if re.search(r"(?m)^- iter \d+ (?:PASS|FAIL)\b", _b):
+            if (re.search(r"(?m)^## Task\b", _b)
+                    or re.search(r"(?m)^- iter \d+ (?:PASS|FAIL)\b", _b)):
                 _cur = _b
         return _cur or re.split(r"(?m)^(?=## )", block_text)[-1]
 
@@ -947,7 +1314,7 @@ def main():
     if not existing:
         try:
             r = subprocess.run(["git", "-C", str(root), "log", "--oneline"],
-                               capture_output=True, text=True, timeout=20)
+                               capture_output=True, encoding="utf-8", errors="replace", timeout=20)
             rc, out = r.returncode, r.stdout
         except (FileNotFoundError, subprocess.TimeoutExpired):
             rc, out = -1, ""
@@ -1130,8 +1497,13 @@ def main():
                   "`- working-note:` lifecycle lines (created → updated → distilled → deleted) "
                   "or a stated `- working-note: na (<why>)` (§A7.15 creation side)")
 
+    # 21) repository hygiene / VCS budget (COV-9 preflight, A10.1) — every
+    #     class and every project kind; no profile can skip it.
+    group("21")
+    repo_hygiene_check(root, existing, args.final)
+
     if GIT_TIMEOUT:
-        warn("groups 14-16: a git call timed out — content gates ran "
+        warn("groups 14-16/21: a git call timed out — content gates ran "
              "on partial data (fail-open); re-run to confirm", "git")
 
     all_fails = list(FAILS) + [{"code": w.get("code", CUR_GROUP), "severity": "warn", "detail": w.get("detail", str(w))} for w in WARN_LINES]
