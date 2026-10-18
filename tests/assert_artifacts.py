@@ -336,7 +336,7 @@ def code_fingerprint(root):
     parts = []
     for rel in sorted(_unquote_git(r) for r in paths):
         ext = os.path.splitext(rel)[1].lower()
-        if ext not in CODE_KIND_EXT or rel.startswith("tests/") or "assert_artifacts.py" in rel or "evidence_seal.py" in rel:
+        if ext not in FINGERPRINT_EXT or rel.startswith("tests/") or "assert_artifacts.py" in rel or "evidence_seal.py" in rel:
             continue
         fp = root / rel
         parts.append(f"{rel}:{hashlib.sha256(fp.read_bytes()).hexdigest() if fp.is_file() else 'gone'}")
@@ -360,6 +360,13 @@ def risk_tier(root):
 
 
 # --- C1/C2 (P1, 2026-10-15): derived task class + evidence media validation
+# fingerprint inputs — SHARED CONTRACT with evidence_seal.py (38 kinds)
+FINGERPRINT_EXT = {".py", ".js", ".ts", ".tsx", ".jsx", ".mjs", ".go", ".rs",
+                   ".java", ".sql", ".c", ".cc", ".cpp", ".h", ".hpp", ".kt",
+                   ".swift", ".php", ".rb", ".cs", ".sh", ".bash", ".bat",
+                   ".ps1", ".toml", ".yaml", ".yml", ".json", ".ini", ".cfg",
+                   ".conf", ".tf", ".tfvars", ".xml", ".css", ".scss", ".sass",
+                   ".less"}
 CODE_KIND_EXT = {".py", ".js", ".ts", ".tsx", ".jsx", ".mjs", ".go", ".rs",
                  ".java", ".sql", ".c", ".cc", ".cpp", ".h", ".hpp", ".kt",
                  ".swift", ".php", ".rb", ".cs"}
