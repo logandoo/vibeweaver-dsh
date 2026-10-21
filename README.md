@@ -6,6 +6,12 @@
 
 ## 它是什么
 
+## 2026-10-21：W18 契约增量移植（批 2/3）
+
+- `tests/assert_artifacts.py` 刷成主线 canonical（22 标记；含 G3 债棘轮 `--record-debt`、G4 claim-lint 当前块 + `- claim-ack:`、G5 手打 hex lint、G6 `- wave-base:` 严格祖先校验）。
+- `lib/lib.js` / `src/lib.js`：`countPasses` 绿色文法改 `PASS\b`（与 COV-1 一致）；新增 `writePathFromArgs`（file_path/path/filePath 全拼写，混合形态 fail-closed）；`src/index.js` 门禁路径解析改走该助手。
+- 验证：`bash script/linux/project_build.sh` exit 0 · `node --test tests/unit/*.test.js` **73/73** · `python3 tests/assert_artifacts.py --existing` **49/49**。
+
 Vibe-coding 的普及正在重塑开发者的角色：当模型写码能力不再构成瓶颈，开发者的核心工作就从"亲自写代码"转向"组织和管理开发过程"。
 
 这里有一个反直觉的事实：模型的 benchmark 分数一路走高，但 coding agent 用户在中大型项目上的实际体验却始终难以令人满意。问题不在模型能力，而在于开发过程中未被明确定义的两件事——**流程**（怎么干活）和**规范**（什么算干完、什么算干对）。agent 不是没能力，而是不知道什么叫"完成任务"。
