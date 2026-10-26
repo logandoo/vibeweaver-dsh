@@ -17,7 +17,7 @@ function makeCtx() {
     log: [],
     registered,
     agents,
-    logger: { warn: (m) => ctx.log.push(`warn: ${m}`) },
+    logger: { warn: (m) => ctx.log.push(`warn: ${m}`), info: (m) => ctx.log.push(`info: ${m}`) },
     on(evt, fn) { (handlers[evt] ||= []).push(fn) },
     // Cordis waterfall 模拟: 与真实 dsh 事件签名一致 ——
     // 事件签名各异（agent/pre-step 两参; tools/post-execute 三参），
@@ -377,6 +377,7 @@ test("M5: agent/disposed 清扫会话状态", async () => {
 // 生产者的正确写法是声明自己的 kind（merge-extensible），这里 = dsh-vibeweaver。
 test("A1: 三处注入的 source.kind 恒为 dsh-vibeweaver（激活卡 / steer / 重建卡）", async () => {
   const SOURCES = []
+  const MESSAGES = []
   // 1) pre-step 激活卡（改 decision.messages）
   ctx = makeCtx()
   apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
@@ -386,6 +387,7 @@ test("A1: 三处注入的 source.kind 恒为 dsh-vibeweaver（激活卡 / steer 
     agent, messages: [msg("帮我修复登录 bug")], turn: 1, step: 0,
   }, () => ({ kind: "enter", messages: [msg("x")] }))
   SOURCES.push(["activation", d1.messages[d1.messages.length - 1].source])
+  MESSAGES.push(["activation", d1.messages[d1.messages.length - 1]])
   // 2) turn-stopping steer（证据红项目 → 必 steer）
   const root = makeActiveProject(true)
   ctx = makeCtx()
@@ -394,6 +396,7 @@ test("A1: 三处注入的 source.kind 恒为 dsh-vibeweaver（激活卡 / steer 
   ctx.agents._register("s2", agent2)
   await ctx.fire("agent/turn-stopping", { agent: agent2, turn: 1, signal: new AbortController().signal }, () => {})
   SOURCES.push(["steer", ctx.steered[0].msg.source])
+  MESSAGES.push(["steer", ctx.steered[0].msg])
   // 3) compaction 重建卡（agent.inject 侧通道）
   ctx = makeCtx()
   apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
@@ -401,15 +404,24 @@ test("A1: 三处注入的 source.kind 恒为 dsh-vibeweaver（激活卡 / steer 
   ctx.agents._register("s3", agent3)
   await ctx.emit("session/event", { id: "s3" }, { type: "compaction/end", data: {} })
   SOURCES.push(["recover", ctx.injected[0].msg.source])
+  MESSAGES.push(["recover", ctx.injected[0].msg])
 
   for (const [where, src] of SOURCES) {
     assert.ok(src, `${where}: 注入缺少 source`)
     assert.equal(src.kind, "dsh-vibeweaver", `${where}: source.kind 必须是生产者自有 kind`)
     assert.ok(!("plugin" in src), `${where}: 不得再带 plugin 字段（0.2.x 读侧按 retired syntax 拒绝）`)
   }
+  // 评审 R2 Critical-1：光有 kind 仍然读不回来——读侧 assertMessageEventShape 要求
+  // 每条 user/message 有非空 id 且 role === "user"，而 dsh-agent-loop 原样落盘不补身份。
+  for (const [where, msg] of MESSAGES) {
+    assert.equal(typeof msg.id, "string", `${where}: 缺 id → 会话重载报 "lacks an identified message"`)
+    assert.ok(msg.id.length > 0, `${where}: id 不得为空`)
+    assert.equal(msg.role, "user", `${where}: role 必须是 user`)
+  }
   // 全文件级钉：源码里不再出现 catch-all 写法（判据 #1 的 grep 断言）
   const entry = readFileSync(new URL("../../src/index.js", import.meta.url), "utf8")
   assert.equal((entry.match(/kind:\s*"plugin"/g) || []).length, 0, 'src/index.js 仍出现 kind: "plugin"')
+  assert.equal((entry.match(/injectedUserMessage\(/g) || []).length, 3, "三处注入必须全走信封工厂，不得有裸消息字面量")
   rmSync(root, { recursive: true, force: true })
 })
 
@@ -457,23 +469,25 @@ function projectDir({ active = true } = {}) {
 
 function cwdProbeCtx(effective, { throws = false } = {}) {
   const c = makeCtx()
-  // 与 cordis 的可选依赖读法对齐：ctx.reflect.get(name) 在服务缺失时返回 undefined。
-  c.reflect = {
-    get: (name) => {
-      if (name !== "workingDirectory") return undefined
-      return {
+  // 按真 cordis 的可选依赖语义建模（评审 R2 Critical-2 的教训：桩必须照上游机制写，
+  // 不能照"我们希望代码怎么读"写）：ctx.inject([name], cb) 在依赖可用时以扩展 ctx 调用
+  // cb；依赖缺席则回调永不触发。上游签名是 get(session)（dsh-working-directory/lib/
+  // index.js:76），传错对象时真服务会抛——所以这里也校验入参形状（评审 I-4）。
+  c.inject = (deps, cb) => {
+    if (!Array.isArray(deps) || !deps.includes("workingDirectory")) return () => {}
+    cb({
+      ...c,
+      workingDirectory: {
         get: (session) => {
-          // 上游签名是 get(session)（dsh-working-directory/lib/index.js:76）。传错对象
-          // （传 agent）时真服务的 projection 查找会抛 → 被我们的 catch 吞掉 → 静默退回
-          // header.cwd，BLOCKER-2 复活而测试全绿（评审 I-4）。所以桩必须校验入参形状。
           if (!session || typeof session !== "object" || !("header" in session)) {
             throw new Error("workingDirectory.get 需要 Session（不是 Agent）")
           }
           if (throws) throw new Error("projection unavailable")
           return effective
         },
-      }
-    },
+      },
+    })
+    return () => {}
   }
   return c
 }

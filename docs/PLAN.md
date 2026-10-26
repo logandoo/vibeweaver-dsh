@@ -1,5 +1,10 @@
 # vibeweaver-dsh 实施计划（C3）
 
+> **状态（2026-10-27）**：本文件是初次构建的 C3 计划，其中的 rc.6 版本口径是**当时的真源快照**，
+> 不是当前支持范围：现在以 `package.json` `engines.dsh: ">=0.1.0-rc.6"` 为准（实测覆盖 0.1.0-rc.6 /
+> 0.1.5-rc.3 / 0.2.1-rc.3）。兼容性动作见 `docs/FIXES_20261026_dsh_compat_and_context.md` 波次 A，
+> API 事实表见 `memory/reference_dsh_plugin_apis.md`。
+
 **Goal:** 把 vibeweaver 技能封装为 dsh rc.6 插件 bundle（渐进披露 + 机械门禁），经 A/B bench 证明效果 ≥ 强制注入。
 **Architecture:** Cordis 插件（bundle patch 挂载）；纯函数核心（src/lib.js）与事件接线（src/index.js）分离，核心单测可覆盖；bench 用双 headless profile。
 **Tech Stack:** Node ESM（零运行时依赖）+ dsh 0.1.0-rc.6（npx 缓存真源）+ node:test + bash + python3（assert/评分）。
