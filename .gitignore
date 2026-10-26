@@ -7,6 +7,9 @@ __pycache__/
 .vibeweaver/
 
 # runtime / work-state artifacts (not source)
+tests/smoke_dump.txt
+tests/smoke_run.txt
+tests/smoke_reload.txt
 memory/
 tests/verification_log.md
 tests/gate_audit.md
