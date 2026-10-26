@@ -462,7 +462,13 @@ function cwdProbeCtx(effective, { throws = false } = {}) {
     get: (name) => {
       if (name !== "workingDirectory") return undefined
       return {
-        get: () => {
+        get: (session) => {
+          // 上游签名是 get(session)（dsh-working-directory/lib/index.js:76）。传错对象
+          // （传 agent）时真服务的 projection 查找会抛 → 被我们的 catch 吞掉 → 静默退回
+          // header.cwd，BLOCKER-2 复活而测试全绿（评审 I-4）。所以桩必须校验入参形状。
+          if (!session || typeof session !== "object" || !("header" in session)) {
+            throw new Error("workingDirectory.get 需要 Session（不是 Agent）")
+          }
           if (throws) throw new Error("projection unavailable")
           return effective
         },
@@ -526,4 +532,45 @@ test("A2: 服务不进 inject（0.1.x 上会让整个插件 INACTIVE）", () => 
   // rc.6/rc.3 没有 workingDirectory 服务，声明它 = 插件在旧版上静默不加载。
   assert.ok(!inject.includes("workingDirectory"), "workingDirectory 必须走可选读，不能声明为必需服务")
   assert.ok(inject.includes("tools"), "inject 面其余项不动")
+})
+
+// 评审 R1（Important-1）：只认服务目录时，一次 cd 出去就把命令面三道守卫整体关掉，
+// 连"绝对路径删项目内文件"都不再看。原项目目录（不可变 header.cwd）必须留在根锚候选里。
+test("A2/R1: 会话 cd 出项目后，命令面守卫仍以原项目为根", async () => {
+  const dirB = projectDir() // 原项目（header.cwd）
+  const dirOut = mkdtempSync(join(tmpdir(), "vcout-")) // 服务报的目录：非项目
+  ctx = cwdProbeCtx(dirOut)
+  apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
+  const agent = makeAgent("sAnchor", dirB)
+  ctx.agents._register("sAnchor", agent)
+  const exec = { name: "bash", arguments: { command: `rm -rf ${dirB}/src` }, agent, callId: "c-anchor" }
+  const d = await ctx.fire("tools/pre-execute", exec, () => ({ kind: "allow" }))
+  assert.equal(d.kind, "deny", "绝对路径指向项目内的递归删除必须仍被拦")
+  assert.match(d.reason, /destructive|破坏性/)
+  rmSync(dirB, { recursive: true, force: true })
+  rmSync(dirOut, { recursive: true, force: true })
+})
+
+// 评审 R1（Minor）：命令面工具的动作在后置之前就已执行完，判红只能把工具自己的输出
+// 换成门禁块。命令面因此不进证据门；只有换目录工具的提示需要投递。
+test("A4/R1: 命令面块档不进后置证据门；换目录工具的提示仍可见", async () => {
+  const root = makeActiveProject(true) // 证据红
+  ctx = makeCtx()
+  apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
+  const agent = makeAgent("sCmd", root)
+  ctx.agents._register("sCmd", agent)
+  const result = { isError: false, content: [{ type: "text", text: "ran" }], value: {} }
+  const d1 = await ctx.fire("tools/post-execute",
+    { name: "run_code", arguments: { code: "print(1)" }, agent, callId: "k1" },
+    result, () => ({ kind: "accept", content: result.content }))
+  assert.equal(d1.kind, "accept", "run_code 不被后置门禁替换输出")
+  assert.ok(!((d1.content || []).map((c) => c.text).join("").includes("GATE-BLOCKED")))
+
+  const d2 = await ctx.fire("tools/post-execute",
+    { name: "working_directory", arguments: { cd: "../.." }, agent, callId: "k2" },
+    result, () => ({ kind: "accept", content: result.content }))
+  const text2 = (d2.content || []).map((c) => c.text || "").join("\n")
+  assert.equal(d2.kind, "accept")
+  assert.match(text2, /项目根|working_directory/, "cd 出项目的提示必须投出去")
+  rmSync(root, { recursive: true, force: true })
 })

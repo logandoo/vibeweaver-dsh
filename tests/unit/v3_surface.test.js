@@ -118,3 +118,68 @@ test("A4: codeCommandTexts 只抽等价破坏动作，不当字符串解析器",
   assert.deepEqual(codeCommandTexts("print('hello')"), [])
   assert.deepEqual(codeCommandTexts(""), [])
 })
+
+// ── 评审 R1 修复钉（Important-2/3 + Minor）─────────────────────────────────
+test("R1: 省略接收者的递归删除同样在册（from shutil import rmtree 曾漏网）", () => {
+  const root = project()
+  const cases = [
+    "from shutil import rmtree\nrmtree('src')",
+    "import { rmSync } from 'node:fs'\nrmSync('src', { recursive: true })",
+    "import { rm } from 'fs/promises'\nawait rm('src', { recursive: true })",
+    "import subprocess\nsubprocess.run('rm -rf src', shell=True)",
+    "import subprocess\nsubprocess.getoutput('rm -rf src')",
+    `require("child_process").spawn("rm", ["-rf", "src"])`,
+    "import os\nos.spawnl(os.P_WAIT, '/bin/rm', '-rf', 'src')",
+  ]
+  for (const code of cases) {
+    const d = decide(root, "run_code", { code, description: "d" })
+    assert.ok(d.deny, `应拦：${code.split("\n")[1] || code}`)
+  }
+  // 白名单与"不带 recursive"仍放行（补覆盖面不等于宁可错杀）
+  assert.equal(decide(root, "run_code", { code: "from shutil import rmtree\nrmtree('node_modules')", description: "d" }).deny, null)
+  assert.equal(decide(root, "run_code", { code: "import os\nos.rmdir('empty-dir')", description: "d" }).deny, null)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("R1: run_code 的写/删落点交回路径守卫（受保护证据 + 风险路径）", () => {
+  const root = project()
+  const prot = decide(root, "run_code", { code: "import os\nos.remove('tests/acceptance.md')", description: "d" })
+  assert.ok(prot.deny, "os.remove 受保护判据必须 DENY（写面同动作被拦，命令面不能豁免）")
+  const trunc = decide(root, "run_code", { code: `open('tests/acceptance.md','w').close()`, description: "d" })
+  assert.ok(trunc.deny, "open(...,'w') 截断受保护判据必须 DENY")
+  const risk = decide(root, "run_code", { code: `open('src/auth/r.py','w').write('x')`, description: "d" })
+  assert.ok(risk.deny, "代码里写风险级路径与写面同判")
+  const lock = decide(root, "run_code", { code: "import os\nos.remove('tests/.evidence.lock')", description: "d" })
+  assert.ok(lock.deny, "锁只能由脚本写")
+  // 读不算动作
+  assert.equal(decide(root, "run_code", { code: `print(open('tests/acceptance.md').read())`, description: "d" }).deny, null)
+  assert.equal(decide(root, "run_code", { code: `open('src/a.js').read()`, description: "d" }).deny, null)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("R1: 多行文本逐行补扫（terminal_send 粘贴两行是常态）", () => {
+  const root = project()
+  const g = "git " + "reset --hard"
+  assert.ok(decide(root, "terminal_send", { sessionId: "t", text: `echo hi\n${g}` }).deny, "第二行的破坏性命令必须看见")
+  assert.ok(decide(root, "bash", { command: `true\nrm -rf src` }).deny, "bash 多行同判")
+  assert.equal(decide(root, "bash", { command: "echo hi\ngit status" }).deny, null)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("R1: 注释行不参与抽取（拦无害文本的代价是让人学会忽略门禁）", () => {
+  const root = project()
+  const d = decide(root, "run_code", { code: "# 注意：不要 shutil.rmtree('src')\nprint(1)", description: "d" })
+  assert.equal(d.deny, null, "注释里提到破坏动作不是动作")
+  const d2 = decide(root, "run_code", { code: "// rm -rf src 是禁止的\nconsole.log(1)", description: "d" })
+  assert.equal(d2.deny, null)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("R1: create_worktree 换目录必须提示（它同样会摘掉门禁）", () => {
+  const root = project()
+  const d = decide(root, "create_worktree", { name: "vw-x" })
+  assert.equal(d.deny, null)
+  assert.equal(d.warn.length, 1)
+  assert.match(d.warn[0], /create_worktree/)
+  rmSync(root, { recursive: true, force: true })
+})

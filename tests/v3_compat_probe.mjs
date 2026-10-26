@@ -8,7 +8,7 @@
 // 用法: node tests/v3_compat_probe.mjs <装有 @deepseek-ai 作用域包的 node_modules 路径>
 // 退出码: 0 = 全部通过; 1 = 有失败; 2 = 上游模块不可得（调用方据此判 na，不判过）
 import { pathToFileURL } from "node:url"
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 const root = process.argv[2]
@@ -41,9 +41,14 @@ console.log(`本插件 src/index.js 的 source: ${JSON.stringify(messageSource()
 check("自有 kind 通过 v4 admission", () => assertV4RowAdmission(row(messageSource())), false)
 // 2) retired 的 catch-all plugin kind 必须被拒（证明本判据不是空跑：旧写法确实致命）
 check('retired kind:"plugin" 被 v4 admission 拒绝', () => assertV4RowAdmission(row({ kind: "plugin", plugin: "dsh-vibeweaver" })), true)
-// 3) 自有 kind 必须逐处一致（三处注入同一个工厂）
-const kinds = new Set([messageSource().kind, messageSource().kind])
-check("三处注入同源同 kind", () => { if (kinds.size !== 1 || !kinds.has("dsh-vibeweaver")) throw new Error("kind 漂移") }, false)
+// 3) 三处注入必须都用这个工厂（真扫源码，不做自我比较的假检查——评审 R1 Minor：
+//    原先写成 `new Set([messageSource().kind, messageSource().kind])`，把同一个表达式
+//    和自己比，即使重建卡退回 plugin 也照样"通过"）。
+const entrySrc = readFileSync(new URL("../src/index.js", import.meta.url), "utf8")
+const sites = (entrySrc.match(/source:\s*messageSource\(\)/g) || []).length
+const inline = (entrySrc.match(/\bsource:\s*\{/g) || []).length
+check(`三处注入同源于 messageSource()（实测 ${sites} 处，内联 source 字面量 ${inline} 处）`,
+  () => { if (sites !== 3 || inline !== 0) throw new Error(`注入点 ${sites}/3，内联残留 ${inline}`) }, false)
 // 注：空 kind 的拒绝点在未导出的 assertV4MessageSources（worker.cjs:11641 同时查
 // length 与 "plugin"），本探针只认证导出的行级 admission；不拿"探针没测到"当"不存在"。
 

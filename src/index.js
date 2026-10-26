@@ -10,6 +10,8 @@ import {
   checkGate,
   preExecuteDecision,
   isGuardedTool,
+  isCommandTool,
+  surfacesGuardWarn,
   blockMessage,
   stallObservation,
   isCodingIntent,
@@ -96,7 +98,9 @@ export function apply(ctx, config = {}) {
   //  2) 可选依赖读法（ctx.reflect.get）：把服务名写进 inject 会让缺少该服务的 0.1.x
   //     整个 fiber epoch=INACTIVE → _unload()（cordis/lib/index.js:1317-1345），
   //     插件在旧版上静默不加载——比门禁降级严重得多。
-  //  3) 服务缺失或抛错 → header.cwd（rc.6/rc.3 旧语义原样保留）。
+  //  3) 服务缺失或抛错 → header.cwd（rc.6/rc.3 旧语义原样保留）。注意服务在场时
+  //     get() 恒返回字符串（projection ?? defaultDirectory），所以第 3 层只在
+  //     "没有服务"或"服务抛错"时到达，不是每次都到的兜底链。
   const effectiveCwd = (agent) => {
     const session = agent?.session
     try {
@@ -109,6 +113,10 @@ export function apply(ctx, config = {}) {
     return session?.header?.cwd
   }
   const agentCwd = (exec) => effectiveCwd(exec?.agent)
+  // 根锚候选：有效目录在前（cd 后归属新目录），原项目目录始终留在候选里。
+  // 只认有效目录时，一次 working_directory/create_worktree 就能把门禁整体关掉
+  // （评审 I-1）——不可变的 header.cwd 是这条退路的地板。
+  const rootHints = (agent) => [effectiveCwd(agent), agent?.session?.header?.cwd]
 
   // 会话级状态（瞬态；持久状态在项目 .vibeweaver/state.json 由 stallObservation 管理）
   const injectedAgents = new Set()
@@ -236,7 +244,10 @@ export function apply(ctx, config = {}) {
     const sessionId = exec.agent?.session?.id
     if (sessionId && disabledSessions.has(sessionId)) return next()
     const cwd = agentCwd(exec)
-    const d = preExecuteDecision({ toolName: exec.name, args: exec.arguments, cwd, cfg: gateCfg })
+    const d = preExecuteDecision({
+      toolName: exec.name, args: exec.arguments, cwd,
+      fallbackCwd: exec.agent?.session?.header?.cwd, cfg: gateCfg,
+    })
     if (d.deny && blockMode()) {
       if (exec.callId) { if (deniedCalls.size > 2000) deniedCalls.clear(); deniedCalls.add(exec.callId) }
       return { kind: "deny", reason: d.deny }
@@ -250,12 +261,23 @@ export function apply(ctx, config = {}) {
     if (!gateEnabled()) return next()
     // 后置面与前置守卫同源：只读工具不进；命令面只在 warn 档需要回传提示（评审 I2）
     if (!isGuardedTool(exec.name)) return next()
-    if ((exec.name === "bash" || exec.name === "pwsh" || exec.name === "shell") && gateMode !== "warn") return next()
+    // 命令面只进前置：动作此时**已经执行完**，后置再判红只会把工具自己的输出换成门禁块
+    // （评审 R1）。例外是换目录类工具——它们的提示级结论只有后置这一个投递口
+    // （pre-execute 唯一的出口是 deny）。warn 档维持原样：证据降级为可见提示。
+    if (isCommandTool(exec.name) && gateMode !== "warn") {
+      if (!surfacesGuardWarn(exec.name)) return next()
+      const notes = preExecuteDecision({
+        toolName: exec.name, args: exec.arguments,
+        cwd: agentCwd(exec), fallbackCwd: exec.agent?.session?.header?.cwd, cfg: gateCfg,
+      }).warn
+      if (!notes.length) return next()
+      return { kind: "accept", content: [...(result.content || []), { type: "text", text: notes.join("\n") }] }
+    }
     if (process.env.VIBEWEAVER_GATE === "off") return next()
     const sessionId = exec.agent?.session?.id
     if (sessionId && disabledSessions.has(sessionId)) return next()
     const filePath = writePathFromArgs(exec.arguments) // W18: file_path/path/filePath 全拼写
-    const root = findProjectRoot([filePath, agentCwd(exec)])
+    const root = findProjectRoot([filePath, ...rootHints(exec.agent)])
     if (!root) return next()
     if (sessionId && filePath && result?.isError !== true) lastWriteAt.set(sessionId, Date.now())
     invalidateGateCache(root) // 写操作已落盘 → 缓存失效, 本次检查重跑
@@ -265,8 +287,13 @@ export function apply(ctx, config = {}) {
     const gate = checkGate(root, gateCfg)
     const base = () => ({ kind: "accept", content: result.content })
     // warn 档：证据门禁与守卫一律不阻断，降级为写后可见提示（block 档才 deny/block）
-    const guardWarn = gateMode === "warn"
-      ? preExecuteDecision({ toolName: exec.name, args: exec.arguments, cwd: sessionId ? agentCwd(exec) : undefined, cfg: gateCfg }).warn
+    const guardWarn = gateMode === "warn" || surfacesGuardWarn(exec.name)
+      ? preExecuteDecision({
+          toolName: exec.name, args: exec.arguments,
+          cwd: sessionId ? agentCwd(exec) : undefined,
+          fallbackCwd: exec.agent?.session?.header?.cwd,
+          cfg: gateCfg,
+        }).warn
       : []
     if (gate && gate.blocking.length) {
       if (!blockMode()) {
@@ -303,7 +330,7 @@ export function apply(ctx, config = {}) {
     const agent = payload.agent
     const sessionId = agent?.session?.id
     if (sessionId && disabledSessions.has(sessionId)) return
-    const root = findProjectRoot(effectiveCwd(agent))
+    const root = findProjectRoot(rootHints(agent))
     if (!root) return
 
     const testFile = (name) => join(root, "tests", name)
@@ -366,7 +393,7 @@ export function apply(ctx, config = {}) {
     },
     async execute(args, exec) {
       const cwd = args?.cwd || effectiveCwd(exec.agent)
-      const root = findProjectRoot(cwd)
+      const root = findProjectRoot([cwd, ...rootHints(exec.agent)])
       if (!root) return { pass: true, blocking: [], warnings: [] }
       const gate = checkGate(root, gateCfg)
       if (!gate) return { pass: true, blocking: [], warnings: [] }
@@ -390,7 +417,7 @@ export function apply(ctx, config = {}) {
         if (sessionId) disabledSessions.delete(sessionId)
         return { kind: "success", text: "vibeweaver gate enabled for this session。" }
       }
-      const root = findProjectRoot(effectiveCwd(invocation.agent))
+      const root = findProjectRoot(rootHints(invocation.agent))
       if (!root) return { kind: "success", text: "vibeweaver: 当前工作区非 vibeweaver-active（无 tests/verification_log.md），gate 不生效。" }
       const gate = checkGate(root, gateCfg)
       if (!gate) return { kind: "success", text: "vibeweaver gate: PASS（证据齐）。" }
