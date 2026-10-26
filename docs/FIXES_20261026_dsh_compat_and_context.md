@@ -4,6 +4,13 @@
 用法：每个任务块自包含（文件 / 接缝 / 步骤 / 验证命令 / 回滚），零上下文执行者可直接接手。
 **开工前置**：`Mode: AUTO`、`Lane` 按块标注、每块自带 COV-9 基线；本仓 `verification_log.md` 只追加（见 §F 纪律）。
 
+> **状态（2026-10-27）**：波次 A（A1-A6）**已完成**，区间 `4107240..f8432fc`，判据与证据见
+> `tests/acceptance.md`「波次 A」块 / `tests/coverage_matrix_wave_a.md`。三处按原文执行会出事，
+> 已改为安全写法并各记 ADR：**A2 的 `inject` 加名**（会让插件在 0.1.x 上静默不加载，D-11）、
+> **A4 把 `lsp` 归命令面**（实测是只读导航，D-12）、**A4 把 `cd` 并进 `writePathFromArgs`**
+> （会让门禁 block 掉切目录，D-13）。波次 B/C 未动。API 事实见 `memory/reference_dsh_plugin_apis.md`。
+
+
 ## Consistency Hub（改前先对齐这些字面值）
 
 | 实体 | 正源 | 现值 |
