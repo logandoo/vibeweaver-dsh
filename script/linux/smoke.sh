@@ -100,6 +100,14 @@ else
   echo "[SMOKE] SKIP: 上游 0.2.x 读侧不可得（设 DSH_V3_MODULES 指向装好 @deepseek-ai/dsh@0.2.x 的 node_modules）"
 fi
 
+# ── (4b) 真 cordis 容器探针：可选依赖的语义与时序（评审 R2 + FCV M7 的守卫）──────
+echo "[SMOKE] (4b) real-cordis 探针（ctx.inject 可选依赖 / 服务缺席回退）"
+if [ -n "$V3_ROOT" ] && [ -d "$V3_ROOT/@deepseek-ai/cordis" ]; then
+  node tests/real_cordis_probe.mjs "$V3_ROOT" || { echo "[SMOKE] FAIL: 真容器里可选依赖语义不成立" >&2; exit 1; }
+else
+  echo "[SMOKE] SKIP: 真 cordis 不可得（同上 DSH_V3_MODULES）"
+fi
+
 echo "[SMOKE] (5/5) 检查产物"
 grep -qi "vibeweaver" tests/smoke_run_$PIN.txt 2>/dev/null && echo "[SMOKE] PASS: vibeweaver 出现在会话产物" || echo "[SMOKE] WARN: 未在产物中见 vibeweaver（查看 tests/smoke_run_$PIN.txt）"
 done

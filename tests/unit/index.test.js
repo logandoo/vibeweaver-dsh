@@ -475,7 +475,10 @@ function cwdProbeCtx(effective, { throws = false } = {}) {
   // index.js:76），传错对象时真服务会抛——所以这里也校验入参形状（评审 I-4）。
   c.inject = (deps, cb) => {
     if (!Array.isArray(deps) || !deps.includes("workingDirectory")) return () => {}
-    cb({
+    // 回调**异步**触发：真 cordis 的可选依赖回调晚于 apply() 返回（tests/real_cordis_probe.mjs
+    // 在真容器里实测顺序 = ["apply-end","cb"]）。桩若同步触发，"apply 时快照服务"的错误
+    // 实现在单测里照样全绿——FCV M7 就是这个盲区（评审 R2 的 reflect.get 空转同族）。
+    const t = setTimeout(() => cb({
       ...c,
       workingDirectory: {
         get: (session) => {
@@ -486,17 +489,20 @@ function cwdProbeCtx(effective, { throws = false } = {}) {
           return effective
         },
       },
-    })
-    return () => {}
+    }), 0)
+    return () => clearTimeout(t)
   }
   return c
 }
+// 等可选依赖回调落地（与真 cordis 同序：晚于 apply()）
+const settle = () => new Promise((r) => setTimeout(r, 0))
 
 test("A2: header.cwd 与服务报不同目录时，门禁命中服务目录（turn-stopping + gate 工具）", async () => {
   const dirA = projectDir({ active: false }) // header.cwd：非 vibeweaver 项目
   const dirB = projectDir()                  // 服务报：会话 cd 后的真项目（证据红）
   ctx = cwdProbeCtx(dirB)
   apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
+  await settle()
   const agent = makeAgent("sA2", dirA)
   ctx.agents._register("sA2", agent)
   const signal = new AbortController().signal
@@ -531,6 +537,7 @@ test("A2: 服务抛错 → 回退 header.cwd（宿主子系统故障不得让门
   const dirB = projectDir()
   ctx = cwdProbeCtx(dirB, { throws: true })
   apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
+  await settle()
   const agent = makeAgent("sA2c", dirB)
   ctx.agents._register("sA2c", agent)
   const signal = new AbortController().signal
@@ -557,6 +564,7 @@ test("A2/R1 镜像夹具: 项目在**服务**一侧时，守卫仍必须认得�
   const dirOut = mkdtempSync(join(tmpdir(), "vcout2-")) // header.cwd：非项目
   ctx = cwdProbeCtx(dirB)
   apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
+  await settle()
   const agent = makeAgent("sMirror", dirOut)
   ctx.agents._register("sMirror", agent)
   const exec = { name: "bash", arguments: { command: "rm -rf src" }, agent, callId: "c-mirror" }
@@ -590,6 +598,7 @@ test("A2/R1: 会话 cd 出项目后，命令面守卫仍以原项目为根", asy
   const dirOut = mkdtempSync(join(tmpdir(), "vcout-")) // 服务报的目录：非项目
   ctx = cwdProbeCtx(dirOut)
   apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
+  await settle()
   const agent = makeAgent("sAnchor", dirB)
   ctx.agents._register("sAnchor", agent)
   const exec = { name: "bash", arguments: { command: `rm -rf ${dirB}/src` }, agent, callId: "c-anchor" }
