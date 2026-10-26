@@ -536,6 +536,41 @@ test("A2: 服务不进 inject（0.1.x 上会让整个插件 INACTIVE）", () => 
 
 // 评审 R1（Important-1）：只认服务目录时，一次 cd 出去就把命令面三道守卫整体关掉，
 // 连"绝对路径删项目内文件"都不再看。原项目目录（不可变 header.cwd）必须留在根锚候选里。
+test("A2/R1 镜像夹具: 项目在**服务**一侧时，守卫仍必须认得它", async () => {
+  // 判别对象：把 effectiveCwd 退回 header.cwd（评审复评 M-M 变异）时，本例会从 DENY 变 ALLOW。
+  // 上一例的项目在 header.cwd 一侧，所以那个变异在它眼里"碰巧正确"——这就是盲区。
+  const dirB = projectDir() // 服务报的目录：真项目
+  const dirOut = mkdtempSync(join(tmpdir(), "vcout2-")) // header.cwd：非项目
+  ctx = cwdProbeCtx(dirB)
+  apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
+  const agent = makeAgent("sMirror", dirOut)
+  ctx.agents._register("sMirror", agent)
+  const exec = { name: "bash", arguments: { command: "rm -rf src" }, agent, callId: "c-mirror" }
+  const d = await ctx.fire("tools/pre-execute", exec, () => ({ kind: "allow" }))
+  assert.equal(d.kind, "deny", "相对路径的破坏性命令必须按服务目录归属项目")
+  rmSync(dirB, { recursive: true, force: true })
+  rmSync(dirOut, { recursive: true, force: true })
+})
+
+test("A4/R1: /vibe off 之后命令面提示也必须彻底安静", async () => {
+  const root = makeActiveProject(false)
+  ctx = makeCtx()
+  apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
+  const agent = makeAgent("sOff", root)
+  ctx.agents._register("sOff", agent)
+  const result = { isError: false, content: [{ type: "text", text: "ok" }], value: {} }
+  await ctx.fire("tools/pre-execute",
+    { name: "working_directory", arguments: { cd: "../.." }, agent, callId: "k-off" }, () => ({ kind: "allow" }))
+  const cmd = ctx.registered.commands.find((c) => c.name === "vibe")
+  await cmd.handler({ agent, rawInput: "off", commandId: "c", signal: new AbortController().signal })
+  const after = await ctx.fire("tools/post-execute",
+    { name: "working_directory", arguments: { cd: "../.." }, agent, callId: "k-off" },
+    result, () => ({ kind: "accept", content: result.content }))
+  const text = (after.content || []).map((c) => c.text || "").join("")
+  assert.ok(!/项目根|working_directory/.test(text), "禁用会话不得再投守卫提示（评审 R1 复评）")
+  rmSync(root, { recursive: true, force: true })
+})
+
 test("A2/R1: 会话 cd 出项目后，命令面守卫仍以原项目为根", async () => {
   const dirB = projectDir() // 原项目（header.cwd）
   const dirOut = mkdtempSync(join(tmpdir(), "vcout-")) // 服务报的目录：非项目
@@ -566,11 +601,19 @@ test("A4/R1: 命令面块档不进后置证据门；换目录工具的提示仍�
   assert.equal(d1.kind, "accept", "run_code 不被后置门禁替换输出")
   assert.ok(!((d1.content || []).map((c) => c.text).join("").includes("GATE-BLOCKED")))
 
-  const d2 = await ctx.fire("tools/post-execute",
+  const d2 = await ctx.fire("tools/pre-execute",
+    { name: "working_directory", arguments: { cd: "../.." }, agent, callId: "k2" }, () => ({ kind: "allow" }))
+  assert.equal(d2.kind, "allow", "cd 出项目不 deny")
+  const p2 = await ctx.fire("tools/post-execute",
     { name: "working_directory", arguments: { cd: "../.." }, agent, callId: "k2" },
     result, () => ({ kind: "accept", content: result.content }))
-  const text2 = (d2.content || []).map((c) => c.text || "").join("\n")
-  assert.equal(d2.kind, "accept")
-  assert.match(text2, /项目根|working_directory/, "cd 出项目的提示必须投出去")
+  const text2 = (p2.content || []).map((c) => c.text || "").join("\n")
+  assert.equal(p2.kind, "accept")
+  assert.match(text2, /项目根|working_directory/, "前置的提示必须由后置投出（pre→post 链路）")
+  // 同一次调用的提示不得重复投递两次（stash 消费一次即清）
+  const p2b = await ctx.fire("tools/post-execute",
+    { name: "working_directory", arguments: { cd: "../.." }, agent, callId: "k2" },
+    result, () => ({ kind: "accept", content: result.content }))
+  assert.ok(!((p2b.content || []).map((c) => c.text || "").join("").includes("项目根")), "二次后置不得重投")
   rmSync(root, { recursive: true, force: true })
 })

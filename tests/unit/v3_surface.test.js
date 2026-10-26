@@ -183,3 +183,74 @@ test("R1: create_worktree 换目录必须提示（它同样会摘掉门禁）", 
   assert.match(d.warn[0], /create_worktree/)
   rmSync(root, { recursive: true, force: true })
 })
+
+// ── 评审 R1 复评修复钉 ──────────────────────────────────────────────────────
+const TQ = '"' + '"' + '"'   // 三引号，写成拼接避免源码里出现三连字符
+const tq = (p) => `os.remove(${TQ}${p}${TQ})`
+
+test("R1复评: 双参写/搬 API 的落点是目标参数（反向覆盖受保护证据曾放行）", () => {
+  const root = project()
+  const evil = "/tmp/evil.txt"
+  const cases = [
+    `import shutil\nshutil.copyfile('${evil}', 'tests/acceptance.md')`,
+    `import shutil\nshutil.copy('${evil}', 'tests/acceptance.md')`,
+    `import os\nos.replace('${evil}', 'tests/acceptance.md')`,
+    `import os\nos.rename('${evil}', 'tests/acceptance.md')`,
+    `fs.copyFileSync('${evil}', 'tests/acceptance.md')`,
+    `import shutil\nshutil.copytree('/tmp/x', 'src/auth')`,
+    `import os\nos.symlink('${evil}', 'tests/acceptance.md')`,
+  ]
+  for (const code of cases) {
+    const d = decide(root, "run_code", { code, description: "d" })
+    assert.ok(d.deny, `应拦目标参数：${code.split("\n").pop()}`)
+  }
+  // 源只是读：把风险文件备份出去不是改写风险路径（复评的误拦实例）
+  const backup = decide(root, "run_code", { code: `import shutil\nshutil.copyfile('src/auth/r.py', '/tmp/bak.py')`, description: "d" })
+  assert.equal(backup.deny, null, "copy 的源是读，不该按风险路径写拦")
+  // 但搬走（源消失）仍要拦：move/rename 两头都是动作
+  const moved = decide(root, "run_code", { code: `import shutil\nshutil.move('tests/acceptance.md', '/tmp/bak')`, description: "d" })
+  assert.ok(moved.deny, "move 会让受保护判据消失")
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("R1复评: 三引号载荷不是盲区（三连引号曾被两个抽取器读成空串）", () => {
+  const root = project()
+  const g = "git " + "reset --hard"
+  assert.ok(decide(root, "run_code", { code: tq("tests/acceptance.md"), description: "d" }).deny, "os.remove(\"\"\"…\"\"\")")
+  assert.ok(decide(root, "run_code", { code: `open(${TQ}tests/acceptance.md${TQ}, "w")`, description: "d" }).deny, "open(\"\"\"…\"\"\", \"w\")")
+  assert.ok(decide(root, "run_code", { code: `os.system(${TQ}${g}${TQ})`, description: "d" }).deny, "os.system(\"\"\"…\"\"\")")
+  assert.ok(decide(root, "run_code", { code: "execSync(```rm -rf src```)", description: "d" }).deny, "execSync(```…```)")
+  assert.ok(decide(root, "run_code", { code: tq("src") + "\nimport shutil\nshutil.rmtree(" + TQ + "src" + TQ + ")", description: "d" }).deny)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("R1复评: 字符串里的『提到』不是动作（掩码），真调用仍在字符串外命中", () => {
+  const root = project()
+  const mention = decide(root, "run_code", { code: `cases = ["shutil.rmtree('src') must deny"]\nprint(cases)`, description: "d" })
+  assert.equal(mention.deny, null, "测试数据里的命令文本不是动作")
+  const doc = decide(root, "run_code", { code: `check("os.remove('tests/acceptance.md') is blocked")`, description: "d" })
+  assert.equal(doc.deny, null)
+  const real = decide(root, "run_code", { code: "import shutil\nshutil.rmtree('src')", description: "d" })
+  assert.ok(real.deny, "掩码不得把真调用一起掩掉")
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("R1复评: 读模式与同名方法不误拦", () => {
+  const root = project()
+  assert.equal(decide(root, "run_code", { code: `print(pathlib.Path('tests/acceptance.md').open().read())`, description: "d" }).deny, null, "Path(...).open() 默认读")
+  assert.ok(decide(root, "run_code", { code: `pathlib.Path('tests/acceptance.md').open("w").close()`, description: "d" }).deny, "Path(...).open(\"w\") 是写")
+  assert.equal(decide(root, "run_code", { code: `cursor.execute("select 1")\ndb.exec("truncate table users")`, description: "d" }).deny, null, "同名 exec 不是 shell")
+  assert.equal(decide(root, "run_code", { code: "os.removedirs('empty/a')", description: "d" }).deny, null, "removedirs 只删空目录，与 rmdir -p 同判")
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("R1复评: 多行补扫只把『多条命令』当命令，跨行字符串与 heredoc 是数据", () => {
+  const root = project()
+  const g = "git " + "reset --hard"
+  assert.ok(decide(root, "terminal_send", { sessionId: "t", text: `echo hi\n${g}` }).deny, "两条命令必须逐行看")
+  assert.equal(decide(root, "bash", { command: "cat > docs.md <<'EOF'\nNever run\nrm -rf src\nEOF" }).deny, null, "heredoc 体是数据")
+  // 已知豁免（刻意保留）：硬复位那条规则不锚定命令位，所以提交说明里出现该短语同样被拦。
+  // 锚定后 `bash -c "<硬复位>"` 会一起放过——权衡下选择继续拦。实测真值见
+  // tests/dsh-a-boundaries.log：bash -c 形态 DENY、heredoc 形态 allow。
+  rmSync(root, { recursive: true, force: true })
+})
