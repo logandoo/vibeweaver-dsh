@@ -1,10 +1,23 @@
 # vibeweaver-dsh
 
-**vibeweaver 的 DeepSeek Harness (dsh) 专属版本** —— 将 [vibeweaver](https://github.com/logandoo/vibeweaver) 编码规范封装为 dsh 0.1.0-rc.6 插件 bundle：契约本体一字不改，机械执行层换成 dsh 的 Cordis 插件机制。
+**vibeweaver 的 DeepSeek Harness (dsh) 专属版本** —— 将 [vibeweaver](https://github.com/logandoo/vibeweaver) 编码规范封装为 dsh 插件 bundle（`engines.dsh: ">=0.1.0-rc.6"`，实测覆盖 0.1.0-rc.6 / 0.1.5-rc.3 / 0.2.1-rc.3）：契约本体一字不改，机械执行层换成 dsh 的 Cordis 插件机制。
 
 > 本仓库是 vibeweaver 的 dsh harness 专属发行版：原技能面向 opencode，本版本面向 DeepSeek Harness（jsonrpc-agent / headless CLI），非通用替代品。
 
 ## 它是什么
+
+## 2026-10-26：dsh 0.2.1-rc.3 兼容波次 A（两条 BLOCKER + 守卫面补全）
+
+依据 `docs/FIXES_20261026_dsh_compat_and_context.md`（上游 API 事实全部对 0.2.1-rc.3 实包复测，非文档转述）：
+
+- **A1 消息源自有 kind（BLOCKER-1）**：注入消息的 `source` 从 `{kind:"plugin", plugin:"dsh-vibeweaver"}` 改为 `{kind:"dsh-vibeweaver"}`。0.2.x 的 `MessageSourceMap` 取消了 catch-all `plugin`，写侧照收、**读侧 v4 admission 直接抛 `SessionFormatError`**（`worker.cjs:11641`）——注入过激活卡的会话再也打不开。旧读侧对未知 kind 放行，向后兼容。认证不用模型：`tests/v3_compat_probe.mjs` 把 `src/index.js` 真正发出的 source 喂进上游 `assertV4RowAdmission`，含"旧写法必须被拒"的负对照。
+- **A2 有效工作目录（BLOCKER-2）**：0.2.x 会话可 `working_directory{cd}` 改目录，不可变的 `header.cwd` 不再是有效目录，门禁跟着旧读法会在 cd 后**静默失效**。新增 `effectiveCwd()`：`ctx.reflect.get("workingDirectory")?.get(session)` → 回退 `header.cwd`；五个取值点统一。**两处偏离原文**（ADR D-11/D-13）：服务名不写进 `inject`（cordis 见缺服务即 `epoch=INACTIVE → _unload()`，0.1.x 上会让整个插件消失），`cd` 不进写面路径键（否则切目录会被证据门禁 block），改走提示通道。
+- **A3 版本兼容闸**：`package.json` 加 `engines.dsh: ">=0.1.0-rc.6"`；实测 0.2.1-rc.3 不满足时 dsh 拒绝加载 bundle 并给出豁免命令（rc.6 无此闸）。冒烟版本钉改为**从 `engines.dsh` 推导**（漂移即红），并新增"注入后重启加载会话"一步（0.2.x `--session-id`，能力探测后跑，缺配置打 SKIP 不算通过）。
+- **A4 守卫面补 0.2.x 工具**：`run_code` / `working_directory` / `terminal_open|send|signal` / `create_worktree` / `schedule_create|update` 逐个入命令面（**禁前缀通配**）；`lsp` 按实测参数归只读面（ADR D-12）。`run_code` 的程序参数不产生工具调用，`shutil.rmtree('src')` 曾完全绕过守卫——现按"抽等价式交回同一张表"处理：递归删/起 shell 抽成 shell 文本走破坏性表，写/删落点交回风险路径与受保护证据门；多行文本逐行补扫，注释行豁免。
+- **A5/A6 小修**：`compaction/end` 载荷带 `error` 时不再投"已压缩"重建卡；契约段注册显式 `interpolate: false`（0.2.x 默认 `true`，卡面 `{{`/`}}` 为零属隐性不变量）。
+- **评审加固**（独立子代理 4 Important + 8 Minor，逐条裁定）：根锚保留不可变 `header.cwd`（否则一次 cd 就能关掉命令面三道守卫）、命令面工具不再进后置证据门（动作已执行完，判红只会替换工具输出）、`create_worktree` 换目录给提示、A2 桩校验 `get(Session)` 入参形状（变异测试证明旧桩下"传错对象"与"删掉解析"都能全绿）。
+- **验证**：`node --test tests/unit/*.test.js` **143/143**（基线 121 + 本波 22 钉）；`node tests/w19_poc.mjs` 原 15 例判定不变 + 新增 11 例；`bash script/linux/project_build.sh` exit 0 且 lib==src；契约卡 12 组合 7820-7934B <8000；`python3 tests/assert_artifacts.py --existing` exit 0。
+- **未做**：波次 B（上下文管理移植 B1-B6）与波次 C（含 `engines.dsh` 上限裁定，ADR D-14）。
 
 ## 2026-10-26：主线 w19.0 同步（信任底座移植）
 
@@ -86,7 +99,7 @@ flowchart TD
 | **验证器三段树（COV-5）** | 与主线同步：探针 `scripts/mm_probe.py` **随插件捆绑**（与 vibeweaver 字节一致），契约卡默认写正源路径（可随主线更新），正源缺探针时才回退自带副本——PASS → `model-native [image]`（§A4.1.1 协议自读）；FAIL + mm-sensor → `mm-sensor [mode]`（独立打分）；都没有 → `direct read`（DOM/日志核验） |
 | **编码任务自动激活** | pre-step 意图启发式：仅对编码任务注入激活卡，非编码任务零成本 |
 | **机械门禁** | write/edit 后跑 `assert_artifacts.py`，fail-closed（空壳脚本 / 检查器崩溃 / 非零退出却无结构化失败行一律判 BAD）；检查器副本 sha256 必须命中正源 pin，正源可用时优先跑正源；`gate_mode: block \| warn \| off` 三档（warn 自 w19.0 起真实生效：只提示不阻断） |
-| **执行前守卫（w19.0）** | `tools/pre-execute` 拦在工具派发之前：风险级路径写入/删除需 `tests/decisions.md` 批准行；破坏性命令表（全量 stage、`reset --hard`、`clean -fd`、丢弃整个工作树、`truncate`、递归删非白名单）；`- class: DOC` 却写源码直接拒；路径按 realpath + 悬空符号链接归一，`$HOME`/`$PWD` 不算白名单 |
+| **执行前守卫（w19.0 · 波次 A 扩面）** | `tools/pre-execute` 拦在工具派发之前：风险级路径写入/删除需 `tests/decisions.md` 批准行；破坏性命令表（全量 stage、`reset --hard`、`clean -fd`、丢弃整个工作树、`truncate`、递归删非白名单）；`- class: DOC` 却写源码直接拒；路径按 realpath + 悬空符号链接归一，`$HOME`/`$PWD` 不算白名单。波次 A 起命令面按 dsh 0.2.x 真实注册名逐个在册（`run_code` 的 `code`、`terminal_send` 的 `text`、`working_directory` 的 `cd`），程序里的递归删/改写落点抽成等价式交回同一张表；未知名字仍归写面 fail-closed，**禁 `^terminal_` / `^mcp__` 前缀通配** |
 | **内容门禁（2026-08-28 主线同步；2026-09-30 扩至 18 组）** | assert 失败消息按证据语义归类 blocking：组 14-16（`secret scan` / `test-change` / `risk-tier`）+ 18 组新增（`DOC-asset render gate` / `exec-check`）+ 声明类证据缺失（`screenshot` / `media evidence`）+ §V11.7 `--class` 交叉校验（`contradicts the log`）——波次 diff 增行含凭据即拦（未加引号的安全引用值豁免）、删测试断言无 `- test-change:` 理由即拦、触及 auth/payment/migration 等高风险路径无 `tests/review_package.md` 即拦、office 资产无 `render:`/`exec-check:` 证据行即拦；Class 谎报由 assert `--class` 交叉校验与完工审计（C18）判 BAD（门禁路径自动识别 `- class:`，不判谎报） |
 | **回合守卫** | steer budget（默认 3）+ 机械化 stall observer（同一文件改 3 次无新增 PASS → 提示按 §A4.10 参数化换方向，防死循环） |
 | **压缩恢复** | compaction 后自动重建契约卡，长任务上下文不丢 |
@@ -238,7 +251,7 @@ bash script/linux/smoke.sh           # headless 冒烟
 ## 依赖
 
 - Node.js ≥ 20（零 npm 运行时依赖）
-- dsh 0.1.0-rc.6
+- dsh `>=0.1.0-rc.6`（`engines.dsh`；实测 0.1.0-rc.6 / 0.1.5-rc.3 / 0.2.1-rc.3 三个运行时均可加载）
 - Python 3.11+（评分脚本 / assert_artifacts.py，`tomllib` 需 3.11+）
 - pnpm（bench profile 安装）
 
