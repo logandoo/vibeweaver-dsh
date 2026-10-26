@@ -10,13 +10,13 @@
 
 - **canonical 快进**：`tests/assert_artifacts.py` 与主线逐字节一致（sha256 `40090938…4ddaa`），新增**组 22 证据锁**、`--root`、`--self-check`。本仓曾长期在 canonical 上重放 5 项 fixed-local 补丁——经逐条具名查证，5 项已被主线全部吸收，副本自此回归"零本地魔改"。
 - **捆绑脚本字节同步**：`mm_probe.py`（C3d 抗暴力哈希：答案文件改存整 token PBKDF2 摘要，读到答案文件也推不出答案）、`backlog_check.py`（C3e：仅提及任务 ID 不算证据，须同一行给出命令 + 退出码 0）、`ui_fidelity.py`（章节号对齐）、新增 `evidence_lock.py`。
-- **契约卡**：补 `COV-0 交付契约`（工件落盘 tests/，最终回答只给结果+证据摘要，仅 `final_gate_line: yes` 才附门行）与 `§A7.7.1 无人值守降级`（CI/批跑/评测不得停下等确认，待确认项写 `- awaiting decision:`，严禁以提问收尾）；检查器组计数升到 `组1-22`。字节预算靠压缩 COV-13 / 任务路由 / COV-5 / 内容门支付（主线自身也把 COV-13 细节下放给 §V11.3），四路径 × block/warn/off 共 8 配置全部 <8000B。
+- **契约卡**：补 `COV-0 交付契约`（工件落盘 tests/，最终回答只给结果+证据摘要，仅 `final_gate_line: yes` 才附门行）与 `§A7.7.1 无人值守降级`（CI/批跑/评测不得停下等确认，待确认项写 `- awaiting decision:`，严禁以提问收尾）；检查器组计数升到 `组1-22`。字节预算靠压缩 COV-13 / 任务路由 / COV-5 / 内容门支付（主线自身也把 COV-13 细节下放给 §V11.3），四路径 × block/warn/off 共 12 组合全部 <8000B（实测 7820-7971B）。
 - **执行前守卫（新增 `tools/pre-execute`）**：风险路径（auth/security/payment/billing/crypto/migration/permission/acl）的写入与删除需 `tests/decisions.md` 的 `- risk-approved:` 批准行；破坏性命令六条规则（全量 stage、`reset --hard`、`clean -fd`、丢弃整个工作树、`truncate`、递归删非白名单）；`- class: DOC` 却写源码直接拒。工具名按黑名单判定（大写 `Bash`、`multiedit`、`apply_patch` 均在面内），显式只读工具不误拦（此处比主线多一处收紧）。
 - **检查器可信度**：项目副本 sha256 必须命中正源 `scripts/assert_artifacts.sha256`，不符即 BAD（`VIBEWEAVER_ALLOW_CUSTOM_CHECKER=1` 可豁免，CI 下失效）；正源可用时优先执行正源（`--root` 指向项目）——**删掉 `tests/assert_artifacts.py` 不再把门禁降级成两行文本底线**。
 - **受保护证据**：`acceptance.md` / `project_profile.json` / `debt_baseline.json` / `.evidence.lock` / 检查器 直写需过 `evidence_lock.py --check`；锁只能由脚本写；`verification_log.md` 只增不删（追加后 `--seal-log`）。
 - **档位与运行器**：`gate_mode: warn` 自此真实生效（此前配置写着三档、实现只有两档）——warn 档一律不阻断，降级为写后 `GATE-WARNING`，契约卡同步改口；`VIBEWEAVER_PYTHON` / `VIBEWEAVER_ASSERT_TIMEOUT_MS` 可覆盖解释器与超时；新增 `.vibeweaver/project.json` 第二激活标记，有标记无日志给一次性 `GATE-INACTIVE` 提示（不静默拦截）。
 - **未移植（有意留口，见 memory/known_gaps_upstream.md）**：宽松旗标前置条件（`--existing` 需 `- profile:` 声明）与 `gate_result.json` 落盘 · 内容指纹缓存（本仓仍是 1s TTL + 写后失效）· 压缩期工作笔记投递 · cue 投递加固 · audit Tier-0/1/2。
-- 验证：`bash script/linux/project_build.sh` exit 0 且 `lib/*.js` 与 `src/*.js` 逐字节一致 · `node --test tests/unit/*.test.js` **109/109** · `python3 tests/assert_artifacts.py --existing` **51/51** · 双对抗评审（R1 信任模型 needs-fix → 修复 9 项后复核）。
+- 验证：`bash script/linux/project_build.sh` exit 0 且 `lib/*.js` 与 `src/*.js` 逐字节一致 · `node --test tests/unit/*.test.js` **121/121** · `python3 tests/assert_artifacts.py --existing --final` **53/53** · 三轮评审（R1 信任模型、R2 契约保真、R3 修复轮复核）needs-fix → 迭代 5 修复 20 项 · FCV 12/12 pass（tests/fcv_report.md）。
 
 ## 2026-10-21：W18 契约增量移植（批 2/3）
 

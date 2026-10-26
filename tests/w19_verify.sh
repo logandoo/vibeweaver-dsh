@@ -17,7 +17,7 @@ for f in mm_probe.py ui_fidelity.py backlog_check.py evidence_lock.py; do
   if [ "$a" = "$b" ]; then echo "  OK  $f  ${a:0:12}"; else echo "  MISMATCH $f"; fi
 done
 
-echo "=== [C3] 契约卡锚词 + 8 配置字节帽 ==="
+echo "=== [C3] 契约卡锚词 + 12 组合字节帽 ==="
 node -e '
 import("./src/lib.js").then(m=>{const c=m.covenantCard({});
 for(const t of ["COV-0 交付契约","final_gate_line","A7.7.1 无人值守","awaiting decision","组1-22","evidence_lock","基线三行默认写 tests/verification_log.md"]) console.log("  anchor", t, c.includes(t)?"OK":"MISSING");
