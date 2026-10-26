@@ -16,6 +16,7 @@ import {
   destructiveBlock,
   classGuardBlock,
   preExecuteDecision,
+  isPlausibleAssertScript,
   findProjectRoot,
   invalidateGateCache,
   inlineCheck,
@@ -133,7 +134,7 @@ test("checker pin: ALLOW_CUSTOM_CHECKER 豁免；CI 环境下豁免失效", () =
 test("checkGate: 带 marker 的伪副本被 pin 拦在运行之前", () => {
   const root = project()
   writeFileSync(join(root, "tests", "assert_artifacts.py"),
-    "# verification_log acceptance cap=5 marker\nprint('assert_artifacts.py: all 40 checks pass (exit 0)')\n")
+    "# verification_log acceptance.md cap=5 — 三标记齐全的空壳（专测 pin 层，不是空壳层）\nprint('assert_artifacts.py: all 40 checks pass (exit 0)')\n")
   const pinHome = tmp()
   mkdirSync(join(pinHome, "scripts"), { recursive: true })
   writeFileSync(join(pinHome, "scripts", "assert_artifacts.sha256"), "a".repeat(64) + "  assert_artifacts.py\n")
@@ -360,6 +361,92 @@ test("preExecuteDecision: VIBEWEAVER_GATE=off 急停优先于一切守卫", () =
 })
 
 // ───────────────────────── 契约卡：COV-0 + §A7.7.1 + 组计数 ─────────────────────────
+// ───────────────── R1 评审修复的回归钉（F1-F7） ─────────────────
+test("F7 空壳检测: 单个 marker 注释不再冒充合法检查器（三标记 AND）", () => {
+  const root = project()
+  writeFileSync(join(root, "tests", "assert_artifacts.py"), "# acceptance.md\nimport sys\nsys.exit(0)\n")
+  assert.equal(isPlausibleAssertScript(root), false, "OR 语义会让一行注释过关")
+  writeFileSync(join(root, "tests", "assert_artifacts.py"), REPO_ASSERT)
+  assert.equal(isPlausibleAssertScript(root), true)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("F2 检查器被删不再降级成两行文本底线（正源检查器接管）", () => {
+  const root = project({ log: "## Task\n- iter 1 PASS: pretend\n" })
+  writeFileSync(join(root, "tests", "acceptance.md"), "> cap=5  stall=3×\n")
+  rmSync(join(root, "tests", "assert_artifacts.py"))
+  const home = tmp()
+  mkdirSync(join(home, "scripts"), { recursive: true })
+  writeFileSync(join(home, "scripts", "assert_artifacts.py"), REPO_ASSERT)
+  const digest = execFileSync("shasum", ["-a", "256", join(home, "scripts", "assert_artifacts.py")], { encoding: "utf8" }).trim().split(/\s+/)[0]
+  writeFileSync(join(home, "scripts", "assert_artifacts.sha256"), digest + "  assert_artifacts.py\n")
+  const gate = checkGate(root, { skillSourceDir: home })
+  assert.ok(gate && gate.blocking.length > 0, "缺检查器时正源必须接管并判证据不足，而不是静默放行")
+  rmSync(root, { recursive: true, force: true })
+  rmSync(home, { recursive: true, force: true })
+})
+
+test("F3 工具名绕过: Bash 大写 / multiedit / apply_patch 仍在守卫面内；显式只读工具不误拦", () => {
+  const root = project()
+  const bashish = preExecuteDecision({ toolName: "Bash", args: { command: "rm -rf src" }, cwd: root, cfg: {} })
+  assert.match(bashish.deny, /destructive guard/)
+  const multi = preExecuteDecision({ toolName: "multiedit", args: { file_path: join(root, "src", "auth", "r.py") }, cwd: root, cfg: {} })
+  assert.match(multi.deny, /risk-path gate/)
+  const patch = preExecuteDecision({ toolName: "apply_patch", args: { path: join(root, "db", "migrations", "1.sql") }, cwd: root, cfg: {} })
+  assert.match(patch.deny, /risk-path gate/)
+  const reader = preExecuteDecision({ toolName: "read", args: { file_path: join(root, "src", "auth", "login.js") }, cwd: root, cfg: {} })
+  assert.equal(reader.deny, null, "读工具不是写面，不得误拦")
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("F4 参数形态冲突（file_path≠path）→ deny，不静默跳过守卫", () => {
+  const root = project()
+  const d = preExecuteDecision({ toolName: "write", args: { file_path: join(root, "src", "a.js"), path: join(root, "src", "auth", "r.py"), filePath: join(root, "src", "b.js") }, cwd: root, cfg: {} })
+  assert.match(d.deny, /arg guard/)
+  const same = preExecuteDecision({ toolName: "write", args: { file_path: join(root, "src", "a.js"), path: join(root, "src", "a.js") }, cwd: root, cfg: {} })
+  assert.equal(same.deny, null, "同值多拼写不是冲突")
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("F5 $HOME/$PWD 不是白名单目标（变量根 ≠ 临时目录）", () => {
+  const root = project()
+  assert.match(destructiveBlock(root, "rm -rf $HOME/.config"), /destructive guard/)
+  assert.match(destructiveBlock(root, "rm -rf $PWD/src"), /destructive guard/)
+  assert.equal(destructiveBlock(root, "rm -rf $TMPDIR/vw-run/x"), null)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("F6 批准行按整路径/目录前缀命中，basename 不再万能钥匙", () => {
+  const root = withApprovals(project(), "- risk-approved: r.py — 想解锁任意路径下的 r.py\n")
+  assert.ok(riskPathBlock(root, join(root, "src", "auth", "r.py")), "basename 批准必须不成立")
+  const dirRoot = withApprovals(project(), "- risk-approved: src/auth — 用户批准整目录\n")
+  assert.equal(riskPathBlock(dirRoot, join(dirRoot, "src", "auth", "login.js")), null)
+  assert.ok(riskPathBlock(dirRoot, join(dirRoot, "src", "billing", "x.js")))
+  rmSync(root, { recursive: true, force: true })
+  rmSync(dirRoot, { recursive: true, force: true })
+})
+
+test("F1 受保护证据: 直接写 .evidence.lock 拒绝；acceptance 写入跑锁校验", () => {
+  const root = project()
+  const lock = preExecuteDecision({ toolName: "write", args: { file_path: join(root, "tests", ".evidence.lock") }, cwd: root, cfg: {} })
+  assert.match(lock.deny, /evidence lock/)
+  // 锁缺失 + 任务证据已在 = 篡改信号（脚本可 --init，但那必须是显式 Class-E 动作）
+  const noLock = preExecuteDecision({ toolName: "write", args: { file_path: join(root, "tests", "acceptance.md") }, cwd: root, cfg: {} })
+  assert.match(noLock.deny, /evidence lock/)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("F1 删除/搬移受保护证据需批准（普通 rm 不带 r 旗标也拦）", () => {
+  const root = project()
+  assert.match(preExecuteDecision({ toolName: "bash", args: { command: "rm tests/assert_artifacts.py" }, cwd: root, cfg: {} }).deny, /evidence lock/)
+  assert.match(preExecuteDecision({ toolName: "bash", args: { command: "git rm tests/acceptance.md" }, cwd: root, cfg: {} }).deny, /risk-approved|evidence lock/)
+  assert.equal(preExecuteDecision({ toolName: "bash", args: { command: "rm scratch.txt" }, cwd: root, cfg: {} }).deny, null)
+  const approved = withApprovals(project(), "- risk-approved: tests/assert_artifacts.py — 用户批准重装 canonical\n")
+  assert.equal(preExecuteDecision({ toolName: "bash", args: { command: "rm tests/assert_artifacts.py" }, cwd: approved, cfg: {} }).deny, null)
+  rmSync(root, { recursive: true, force: true })
+  rmSync(approved, { recursive: true, force: true })
+})
+
 // ─────────────── dsh 钩子层：tools/pre-execute 的真实决策形状 ───────────────
 // fake 按 dsh-tools rc.6 类型建模（PreToolDecision = allow | deny{reason} | ask），
 // 事件签名 'tools/pre-execute'(exec, next)；next() 默认放行（types/index.d.ts L38/L419-425）。
@@ -451,7 +538,12 @@ test("契约卡: 四配置字节全部 <8000（主线新增两行不得破预算
   const cfgs = [{}, { skillSourceDir: "/tmp/skills" }, { skillSourceDir: "/tmp/skills", steerBudget: 5 },
     { skillSourceDir: join(tmpdir(), "a-longer-than-production-skills-path-0123456789", "skills", "vibeweaver"), probeScript: "/opt/vw/scripts/mm_probe.py" }]
   for (const cfg of cfgs) {
-    const bytes = Buffer.byteLength(covenantCard(cfg), "utf8")
-    assert.ok(bytes < 8000, `card must stay <8000B, got ${bytes} for ${JSON.stringify(cfg)}`)
+    for (const gateMode of [undefined, "warn", "off"]) {
+      const bytes = Buffer.byteLength(covenantCard({ ...cfg, gateMode }), "utf8")
+      assert.ok(bytes < 8000, `card must stay <8000B, got ${bytes} for ${JSON.stringify({ ...cfg, gateMode })}`)
+    }
   }
+  // warn 档卡面必须说实话（不得继续写"强制执行"却什么都不拦）
+  assert.match(covenantCard({ gateMode: "warn" }), /gateMode=warn：门禁仅提示不阻断/)
+  assert.doesNotMatch(covenantCard({}), /gateMode=warn：门禁仅提示不阻断/)
 })

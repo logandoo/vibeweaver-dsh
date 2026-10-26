@@ -196,7 +196,7 @@ export function apply(ctx, config = {}) {
     const cwd = exec.agent?.session?.header?.cwd
     const d = preExecuteDecision({ toolName: exec.name, args: exec.arguments, cwd, cfg: gateCfg })
     if (d.deny && blockMode()) {
-      if (exec.callId) deniedCalls.add(exec.callId)
+      if (exec.callId) { if (deniedCalls.size > 2000) deniedCalls.clear(); deniedCalls.add(exec.callId) }
       return { kind: "deny", reason: d.deny }
     }
     return next()
