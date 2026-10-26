@@ -9,6 +9,7 @@ import {
   writePathFromArgs,
   checkGate,
   preExecuteDecision,
+  isGuardedTool,
   blockMessage,
   stallObservation,
   isCodingIntent,
@@ -31,7 +32,7 @@ const ACTIVATION_TEXT = [
   "1. 按 SKILL.md §2 做 ZERO 分解与 web 研究（≥2 方案评估）；",
   "2. 产出 tests/acceptance.md（首行 `> cap=5  stall=3×`）作为验收判据；",
   "3. 声明 `Mode:` / `Lane:` / `Class: CODE|CONFIG|DOC`（COV-12/13，按 git diff --stat 文件种类，不确定取高）；",
-  "4. 遵守 COV-1..13（NO TEST NO DONE / SCRIPT-ONLY / 验证循环 / cap=5 stall=3× 边界 / Class 比例化路径）；",
+  "4. 遵守 COV-0..13（NO TEST NO DONE / SCRIPT-ONLY / 验证循环 / cap=5 stall=3× 边界 / Class 比例化路径）；",
   "5. 完成时输出 [Verification Gate] 行（含字面 HARD-GATE-1/2 token 与 Class 字段）与完成表（CODE=8 列；DOC/CONFIG=lite 3 列），交付 office 资产先过 NO RENDER, NO DONE 渲染门。",
   "证据检查: 需要时调用 vibeweaver_gate 工具自检。",
 ].join("\n")
@@ -50,7 +51,7 @@ const RECOVER_TEXT = [
   "【vibeweaver 重建卡】上下文已压缩。恢复纪律工作流状态：",
   "1. 重读 tests/acceptance.md 逐条核对当前进度；",
   "2. 重读 tests/verification_log.md 全部迭代行（含任务块首条 `- class:` 声明）；",
-  "3. 按 COV-1..13 继续（证据 + 循环边界 + Class 比例化路径 + 完成行格式）。",
+  "3. 按 COV-0..13 继续（证据 + 循环边界 + Class 比例化路径 + 完成行格式）。",
 ].join("\n")
 
 export function apply(ctx, config = {}) {
@@ -60,12 +61,16 @@ export function apply(ctx, config = {}) {
   const preStepActivation = config.preStepActivation !== false
   const recoverAfterCompaction = config.recoverAfterCompaction !== false
 
-  // 视觉探针优先用插件自带的 mm_probe.py（与 vibeweaver 主流程字节一致），
-  // 缺失时回退到 skill 正源目录——保证旧版正源下契约卡的探针命令也不落空。
-  const pluginRoot = fileURLToPath(new URL("../..", import.meta.url))
-  const probeScript = existsSync(join(pluginRoot, "scripts", "mm_probe.py"))
-    ? join(pluginRoot, "scripts", "mm_probe.py")
-    : join(skillSourceDir, "scripts", "mm_probe.py")
+  // 视觉探针优先用插件自带的 mm_probe.py（与 vibeweaver 主线字节一致），缺失时回退
+  // skill 正源目录——旧版正源下契约卡的探针命令也不落空。
+  // 正源副本优先（可随主线更新）；正源没有探针时才用插件自带的那份兜底。
+  // 反直觉之处：捆绑路径几乎总是更长（npx 缓存目录），卡面插值 ${probe} 一旦变长就
+  // 顶破 8000B 契约卡预算，所以"捆绑优先"从来不是可选项——历史 "../.." 指向包父目录
+  // 是 off-by-one（评审 I5），修好的是兜底路径本身，而不是它的优先级。
+  const pluginRoot = fileURLToPath(new URL("..", import.meta.url))
+  const bundledProbe = join(pluginRoot, "scripts", "mm_probe.py")
+  const skillProbe = join(skillSourceDir, "scripts", "mm_probe.py")
+  const probeScript = existsSync(skillProbe) ? skillProbe : bundledProbe
 
   // 贯穿给 lib.js 纯函数的配置面（checker pin 的正源解析 + 守卫的档位判定）
   const gateCfg = { skillSourceDir, steerBudget, gateMode, probeScript }
@@ -147,7 +152,7 @@ export function apply(ctx, config = {}) {
   ctx.systemPrompt.section({
     name: "vibeweaver-covenant",
     order: 100,
-    text: () => covenantCard({ skillSourceDir, steerBudget, probeScript }),
+    text: () => covenantCard(gateCfg), // gateMode 必须在场：warn 档卡面要说实话（评审 N4/I1）
   })
 
   // ── 3. pre-step 激活 ──
@@ -206,14 +211,16 @@ export function apply(ctx, config = {}) {
   const postExecute = async (exec, result, next) => {
     if (exec.callId && deniedCalls.delete(exec.callId)) return next()
     if (!gateEnabled()) return next()
-    if (!GATED_TOOLS.has(exec.name) && !(gateMode === "warn" && (exec.name === "bash" || exec.name === "shell"))) return next()
+    // 后置面与前置守卫同源：只读工具不进；命令面只在 warn 档需要回传提示（评审 I2）
+    if (!isGuardedTool(exec.name)) return next()
+    if ((exec.name === "bash" || exec.name === "pwsh" || exec.name === "shell") && gateMode !== "warn") return next()
     if (process.env.VIBEWEAVER_GATE === "off") return next()
     const sessionId = exec.agent?.session?.id
     if (sessionId && disabledSessions.has(sessionId)) return next()
     const filePath = writePathFromArgs(exec.arguments) // W18: file_path/path/filePath 全拼写
     const root = findProjectRoot([filePath, agentCwd(exec)])
     if (!root) return next()
-    if (sessionId && result?.isError !== true) lastWriteAt.set(sessionId, Date.now())
+    if (sessionId && filePath && result?.isError !== true) lastWriteAt.set(sessionId, Date.now())
     invalidateGateCache(root) // 写操作已落盘 → 缓存失效, 本次检查重跑
     // cue 投递提升于门之上（主线 wave16）：门红时恰是「动手前先读」必须在场
     // 的时刻——block 反馈与 accept 提示两路都携带。

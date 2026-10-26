@@ -17,7 +17,12 @@ import {
   classGuardBlock,
   preExecuteDecision,
   isPlausibleAssertScript,
+  isGuardedTool,
+  isReadOnlyTool,
+  protectedEvidenceCheck,
+  riskApproved,
   findProjectRoot,
+  runAssert,
   invalidateGateCache,
   inlineCheck,
   pythonBin,
@@ -361,6 +366,175 @@ test("preExecuteDecision: VIBEWEAVER_GATE=off 急停优先于一切守卫", () =
 })
 
 // ───────────────────────── 契约卡：COV-0 + §A7.7.1 + 组计数 ─────────────────────────
+// ─────────── 接线级（apply 真实装配，不是纯函数单测） ───────────
+test("N4 接线：warn 档会话渲染出的契约卡确实改口（曾是死代码）", async () => {
+  const { apply } = await import("../../src/index.js")
+  const ctx = makeCtx()
+  apply(ctx, { skillSourceDir: tmp(), gateMode: "warn" })
+  const section = ctx.systemPrompt.sections.find((x) => x.name === "vibeweaver-covenant")
+  assert.ok(section, "契约段必须注册")
+  const text = typeof section.text === "function" ? section.text() : section.text
+  assert.match(text, /gateMode=warn：门禁仅提示不阻断/)
+  const ctx2 = makeCtx()
+  apply(ctx2, { skillSourceDir: tmp() })
+  const t2 = ctx2.systemPrompt.sections.find((x) => x.name === "vibeweaver-covenant").text()
+  assert.doesNotMatch(t2, /gateMode=warn：门禁仅提示不阻断/, "block 档不得出现 warn 说明")
+  assert.match(t2, /急停: VIBEWEAVER_GATE=off/)
+})
+
+test("I2 接线：非白名单写工具（str_replace_editor）也走后置证据门禁", async () => {
+  const { apply } = await import("../../src/index.js")
+  const root = project({ log: "", assertScript: null })
+  writeFileSync(join(root, "tests", "acceptance.md"), "")
+  const ctx = makeCtx()
+  apply(ctx, { skillSourceDir: tmp() })
+  const res = await ctx.fire("tools/post-execute",
+    { name: "str_replace_editor", arguments: { path: join(root, "src", "x.js") }, agent: agentOf("s9", root), callId: "c9" },
+    { content: [{ type: "text", text: "ok" }], isError: false },
+    async () => ({ kind: "accept", content: [{ type: "text", text: "ok" }] }))
+  assert.equal(res.kind, "block", "空日志 + 无检查器 = 证据不足，写工具必须被门禁回拦")
+  assert.match((res.feedback[0].text || ""), /verification_log|assertion script|GATE-BLOCKED/)
+  // 只读工具不得进后置门禁（否则读一个文件就被要求补证据）
+  const r2 = await ctx.fire("tools/post-execute",
+    { name: "read", arguments: { file_path: join(root, "src", "x.js") }, agent: agentOf("s9", root), callId: "c10" },
+    { content: [{ type: "text", text: "file" }], isError: false },
+    async () => ({ kind: "accept", content: [{ type: "text", text: "file" }] }))
+  assert.equal(r2.kind, "accept")
+  rmSync(root, { recursive: true, force: true })
+})
+
+// ───────────── R2/R3 评审修复的回归钉（迭代 5） ─────────────
+test("N3 无 pin 不得接管执行：正源桩不能把门禁洗绿（曾为重言式）", () => {
+  const root = project({ log: "## Task\n- iter 1 PASS: x (evidence: tests/missing.png)\n" })
+  writeFileSync(join(root, "tests", "acceptance.md"), "> cap=5  stall=3×\n")
+  rmSync(join(root, "tests", "assert_artifacts.py"))
+  const home = tmp()
+  mkdirSync(join(home, "scripts"), { recursive: true })
+  // 无 assert_artifacts.sha256 = 无从验证 → 绝不执行这个"正源"，退回内联底线
+  writeFileSync(join(home, "scripts", "assert_artifacts.py"),
+    "# verification_log acceptance.md cap=5\nprint('assert_artifacts.py: all 99 checks pass (exit 0)')\n")
+  const gate = checkGate(root, { skillSourceDir: home })
+  assert.ok(gate && gate.blocking.length > 0, "无 pin 的桩正源必须不被采信；内联底线要拦住缺失截图")
+  rmSync(root, { recursive: true, force: true })
+  rmSync(home, { recursive: true, force: true })
+})
+
+test("I3 正源不认 --root 时自动退回（版本偏差不把门禁永久判红）", () => {
+  const root = fullProject()
+  rmSync(join(root, "tests", "assert_artifacts.py"))
+  const home = tmp()
+  mkdirSync(join(home, "scripts"), { recursive: true })
+  const fake = [
+    "#!/usr/bin/env python3",
+    "import sys",
+    "if '--root' in sys.argv: sys.exit('error: unrecognized arguments: --root')",
+    "if '--help' in sys.argv: print('usage: assert_artifacts.py [-h] [--existing]'); sys.exit(0)",
+    "print('assert_artifacts.py: all 40 checks pass (exit 0)')",
+    "",
+  ].join("\n")
+  writeFileSync(join(home, "scripts", "assert_artifacts.py"), fake)
+  const digest = execFileSync("shasum", ["-a", "256", join(home, "scripts", "assert_artifacts.py")], { encoding: "utf8" }).trim().split(/\s+/)[0]
+  writeFileSync(join(home, "scripts", "assert_artifacts.sha256"), digest + "  assert_artifacts.py\n")
+  const r = runAssert(root, { skillSourceDir: home })
+  assert.equal(r.ok, true, "正源不认 --root 时应改走不带 --root 的调用而不是判红：" + JSON.stringify(r.attempts || ""))
+  rmSync(root, { recursive: true, force: true })
+  rmSync(home, { recursive: true, force: true })
+})
+
+test("N1/N2 受保护删除面：前导空白与复合段不得绕过；一条批准不外溢", () => {
+  const root = project()
+  const d = (cmd) => preExecuteDecision({ toolName: "bash", args: { command: cmd }, cwd: root, cfg: {} }).deny
+  assert.match(d("   rm tests/assert_artifacts.py"), /evidence lock/, "前导空格曾让 ^ 锚点整体失效")
+  assert.match(d("mv scratch.txt out.txt && rm tests/assert_artifacts.py"), /evidence lock/, "曾只查第一段")
+  assert.match(d("dd if=/dev/zero of=tests/acceptance.md bs=1 count=1"), /evidence lock/, "dd of= 形态")
+  assert.match(d("rm tests/acceptance.md tests/.evidence.lock"), /evidence lock/, "批准一个不得解锁另一个")
+  assert.equal(d("rm scratch.txt"), null, "非受保护目标不误拦")
+  assert.equal(d("git status tests/acceptance.md"), null, "无删除动词的只读命令不误拦")
+  const approved = withApprovals(project(), "- risk-approved: tests/acceptance.md — 只批准改判据\n")
+  const d2 = (cmd) => preExecuteDecision({ toolName: "bash", args: { command: cmd }, cwd: approved, cfg: {} }).deny
+  assert.equal(d2("rm tests/acceptance.md"), null)
+  assert.match(d2("rm tests/acceptance.md tests/assert_artifacts.py"), /evidence lock/, "同行未批准的受保护路径仍要拦")
+  rmSync(root, { recursive: true, force: true })
+  rmSync(approved, { recursive: true, force: true })
+})
+
+test("N5 文件级批准不得上溢解锁父目录；命令里的 ./ 归一", () => {
+  const root = withApprovals(project(), "- risk-approved: src/auth/r.py — 用户只批准这一个文件\n")
+  assert.equal(riskApproved(root, "src/auth/r.py"), true)
+  assert.equal(riskApproved(root, "src/auth"), false, "文件批准解锁整个目录 = 上溢")
+  assert.equal(riskApproved(root, "src/auth/login.js"), false)
+  assert.match(riskCommandBlock(root, "rm -rf ./src/auth"), /risk-path gate/, "./ 前缀不得绕过")
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("M2 仓库自身的 *.lock（Cargo.lock 等）不是受保护证据", () => {
+  const root = project()
+  assert.equal(preExecuteDecision({ toolName: "write", args: { file_path: join(root, "Cargo.lock") }, cwd: root, cfg: {} }).deny, null)
+  assert.notEqual(preExecuteDecision({ toolName: "write", args: { file_path: join(root, "tests", ".evidence.lock") }, cwd: root, cfg: {} }).deny, null)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("M3 同一文件的相对/绝对两种写法不算参数冲突", () => {
+  const root = project()
+  const same = preExecuteDecision({ toolName: "write", args: { file_path: "src/a.js", path: join(root, "src", "a.js") }, cwd: root, cfg: {} })
+  assert.equal(same.deny, null)
+  const diff = preExecuteDecision({ toolName: "write", args: { file_path: "src/a.js", path: join(root, "src", "b.js") }, cwd: root, cfg: {} })
+  assert.match(diff.deny, /arg guard/)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("C1 dsh 真实只读工具（read_image/present/glob/grep）不进写面；pwsh 进命令面", () => {
+  const root = project()
+  for (const name of ["read", "read_image", "present", "glob", "grep", "web_fetch", "todo_write"]) {
+    assert.equal(isReadOnlyTool(name), true, name + " 必须是只读面")
+    assert.equal(preExecuteDecision({ toolName: name, args: { file_path: join(root, "src", "auth", "shot.png") }, cwd: root, cfg: {} }).deny, null,
+      name + " 读风险命名文件不得被拦（COV-5 截图取证面）")
+  }
+  for (const name of ["write", "edit", "str_replace_editor", "multiedit", "apply_patch"]) {
+    assert.equal(isGuardedTool(name) && !isReadOnlyTool(name), true, name + " 必须是写面")
+  }
+  assert.match(preExecuteDecision({ toolName: "pwsh", args: { command: "git " + "clean -fdx" }, cwd: root, cfg: {} }).deny, /destructive guard/, "Windows 命令面不得裸奔")
+  // 通配免检牌不得存在：session_*/agent_* 这类前缀不能白名单化未来的写工具
+  assert.equal(isReadOnlyTool("session_write_file"), false)
+  assert.equal(isReadOnlyTool("agent_edit"), false)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("I4 校验跑不了（python 缺失/超时）→ 提示而非判篡改", () => {
+  const root = project()
+  writeFileSync(join(root, "tests", ".evidence.lock"), "{}\n")
+  const home = tmp()
+  mkdirSync(join(home, "scripts"), { recursive: true })
+  writeFileSync(join(home, "scripts", "evidence_lock.py"), "#!/usr/bin/env python3\nraise SystemExit(0)\n")
+  process.env.VIBEWEAVER_PYTHON = "/nonexistent/python3.99"
+  const r = protectedEvidenceCheck(root, join(root, "tests", "acceptance.md"), { skillSourceDir: home })
+  delete process.env.VIBEWEAVER_PYTHON
+  assert.equal(r.deny, null, "基础设施故障不得判成篡改：" + r.deny)
+  assert.ok(r.warn.length > 0, "必须留下未校验的可见提示")
+  rmSync(root, { recursive: true, force: true })
+  rmSync(home, { recursive: true, force: true })
+})
+
+test("R2-M2 pin 缺失提示每会话一次（判据 #4 的一次性 WARN 字面承诺）", () => {
+  const root = project()
+  const home = tmp()
+  const g1 = checkGate(root, { skillSourceDir: home })
+  assert.ok(g1 && g1.warnings.some((w) => /checker pin unavailable/.test(w)), "首跑必须提示 pin 缺失")
+  invalidateGateCache(root)
+  const g2 = checkGate(root, { skillSourceDir: home })
+  assert.ok(!g2 || !g2.warnings.some((w) => /checker pin unavailable/.test(w)), "同一 root+摘要 不得每写一次刷一遍")
+  rmSync(root, { recursive: true, force: true })
+  rmSync(home, { recursive: true, force: true })
+})
+
+test("R2-M4 卡面回补：COV-13 反降类句 / [Decisions] 字面 / §V11.9 格式覆盖面", () => {
+  const card = covenantCard({})
+  assert.match(card, /Class 决定哪些门跑，不决定证据存无/)
+  assert.match(card, /\[Decisions\] N auto-decisions → tests\/decisions\.md/)
+  assert.match(card, /ods\/odp\/odg/)
+  assert.match(card, /无人时不阻塞/)
+})
+
 // ───────────────── R1 评审修复的回归钉（F1-F7） ─────────────────
 test("F7 空壳检测: 单个 marker 注释不再冒充合法检查器（三标记 AND）", () => {
   const root = project()
@@ -457,7 +631,7 @@ function makeCtx(cfg) {
     logger: { warn() {} },
     on(evt, fn) { (handlers[evt] ||= []).push(fn) },
     tools: { register() {} },
-    systemPrompt: { section() {} },
+    systemPrompt: { sections: [], section(x) { this.sections.push(x) } },
     skills: { registerProvider() {} },
     commands: { register() {} },
     agents: { get() { return undefined } },

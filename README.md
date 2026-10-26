@@ -82,8 +82,8 @@ flowchart TD
 
 | 机制 | 做了什么 |
 | --- | --- |
-| **渐进披露契约段** | 紧凑契约卡（~2.1K tokens / 7.6KB，<8KB 上限；wave3 含 COV-12 双模式与任务类型路由，2026-09-30 含 COV-13 Class 声明与 §V11.9 渲染门）常驻上下文；skill 全文按需加载——替代全量强制注入（A/B 评测验证 token 用量显著下降） |
-| **验证器三段树（COV-5）** | 与主线同步：探针 `scripts/mm_probe.py` **随插件捆绑**（与 vibeweaver 字节一致），契约卡优先用自带副本、缺失时回退正源目录——PASS → `model-native [image]`（§A4.1.1 协议自读）；FAIL + mm-sensor → `mm-sensor [mode]`（独立打分）；都没有 → `direct read`（DOM/日志核验） |
+| **渐进披露契约段** | 紧凑契约卡（~2.2K tokens / 7.9KB，<8KB 上限；wave3 含 COV-12 双模式与任务类型路由，2026-09-30 含 COV-13 Class 声明与 §V11.9 渲染门）常驻上下文；skill 全文按需加载——替代全量强制注入（A/B 评测验证 token 用量显著下降） |
+| **验证器三段树（COV-5）** | 与主线同步：探针 `scripts/mm_probe.py` **随插件捆绑**（与 vibeweaver 字节一致），契约卡默认写正源路径（可随主线更新），正源缺探针时才回退自带副本——PASS → `model-native [image]`（§A4.1.1 协议自读）；FAIL + mm-sensor → `mm-sensor [mode]`（独立打分）；都没有 → `direct read`（DOM/日志核验） |
 | **编码任务自动激活** | pre-step 意图启发式：仅对编码任务注入激活卡，非编码任务零成本 |
 | **机械门禁** | write/edit 后跑 `assert_artifacts.py`，fail-closed（空壳脚本 / 检查器崩溃 / 非零退出却无结构化失败行一律判 BAD）；检查器副本 sha256 必须命中正源 pin，正源可用时优先跑正源；`gate_mode: block \| warn \| off` 三档（warn 自 w19.0 起真实生效：只提示不阻断） |
 | **执行前守卫（w19.0）** | `tools/pre-execute` 拦在工具派发之前：风险级路径写入/删除需 `tests/decisions.md` 批准行；破坏性命令表（全量 stage、`reset --hard`、`clean -fd`、丢弃整个工作树、`truncate`、递归删非白名单）；`- class: DOC` 却写源码直接拒；路径按 realpath + 悬空符号链接归一，`$HOME`/`$PWD` 不算白名单 |

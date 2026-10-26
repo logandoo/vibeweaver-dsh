@@ -180,10 +180,11 @@ test("covenantCard: 含 COV-13 Class 声明与 §V11.9 渲染门 token（2026-09
   assert.ok(Buffer.byteLength(card) < 8000, `card exceeds 8KB bytes: ${Buffer.byteLength(card)}`)
 })
 
-test("index.js 激活/重建文本覆盖 COV-1..13（2026-09-30 移植）", () => {
+test("index.js 激活/重建文本覆盖 COV-0..13（主线 w19.0 起含 COV-0）", () => {
   const src = readFileSync(new URL("../../src/index.js", import.meta.url), "utf8")
   assert.ok(!src.includes("COV-1..11"), "stale COV-1..11 range must be gone")
-  assert.ok(src.includes("COV-1..13"), "activation/recover texts must span COV-1..13")
+  assert.ok(!src.includes("COV-1..13"), "COV-1..13 是主线加 COV-0 之前的旧范围")
+  assert.ok(src.includes("COV-0..13"), "activation/recover texts must span COV-0..13")
   assert.ok(src.includes("Class: CODE|CONFIG|DOC"), "activation text must prompt the Class declaration")
   // 发货件是 lib/index.js（package.json main）——lib 须与 src 同步
   const libSrc = readFileSync(new URL("../../lib/index.js", import.meta.url), "utf8")
