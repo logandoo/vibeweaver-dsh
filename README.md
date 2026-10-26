@@ -6,6 +6,18 @@
 
 ## 它是什么
 
+## 2026-10-26：主线 w19.0 同步（信任底座移植）
+
+- **canonical 快进**：`tests/assert_artifacts.py` 与主线逐字节一致（sha256 `40090938…4ddaa`），新增**组 22 证据锁**、`--root`、`--self-check`。本仓曾长期在 canonical 上重放 5 项 fixed-local 补丁——经逐条具名查证，5 项已被主线全部吸收，副本自此回归"零本地魔改"。
+- **捆绑脚本字节同步**：`mm_probe.py`（C3d 抗暴力哈希：答案文件改存整 token PBKDF2 摘要，读到答案文件也推不出答案）、`backlog_check.py`（C3e：仅提及任务 ID 不算证据，须同一行给出命令 + 退出码 0）、`ui_fidelity.py`（章节号对齐）、新增 `evidence_lock.py`。
+- **契约卡**：补 `COV-0 交付契约`（工件落盘 tests/，最终回答只给结果+证据摘要，仅 `final_gate_line: yes` 才附门行）与 `§A7.7.1 无人值守降级`（CI/批跑/评测不得停下等确认，待确认项写 `- awaiting decision:`，严禁以提问收尾）；检查器组计数升到 `组1-22`。字节预算靠压缩 COV-13 / 任务路由 / COV-5 / 内容门支付（主线自身也把 COV-13 细节下放给 §V11.3），四路径 × block/warn/off 共 8 配置全部 <8000B。
+- **执行前守卫（新增 `tools/pre-execute`）**：风险路径（auth/security/payment/billing/crypto/migration/permission/acl）的写入与删除需 `tests/decisions.md` 的 `- risk-approved:` 批准行；破坏性命令六条规则（全量 stage、`reset --hard`、`clean -fd`、丢弃整个工作树、`truncate`、递归删非白名单）；`- class: DOC` 却写源码直接拒。工具名按黑名单判定（大写 `Bash`、`multiedit`、`apply_patch` 均在面内），显式只读工具不误拦（此处比主线多一处收紧）。
+- **检查器可信度**：项目副本 sha256 必须命中正源 `scripts/assert_artifacts.sha256`，不符即 BAD（`VIBEWEAVER_ALLOW_CUSTOM_CHECKER=1` 可豁免，CI 下失效）；正源可用时优先执行正源（`--root` 指向项目）——**删掉 `tests/assert_artifacts.py` 不再把门禁降级成两行文本底线**。
+- **受保护证据**：`acceptance.md` / `project_profile.json` / `debt_baseline.json` / `.evidence.lock` / 检查器 直写需过 `evidence_lock.py --check`；锁只能由脚本写；`verification_log.md` 只增不删（追加后 `--seal-log`）。
+- **档位与运行器**：`gate_mode: warn` 自此真实生效（此前配置写着三档、实现只有两档）——warn 档一律不阻断，降级为写后 `GATE-WARNING`，契约卡同步改口；`VIBEWEAVER_PYTHON` / `VIBEWEAVER_ASSERT_TIMEOUT_MS` 可覆盖解释器与超时；新增 `.vibeweaver/project.json` 第二激活标记，有标记无日志给一次性 `GATE-INACTIVE` 提示（不静默拦截）。
+- **未移植（有意留口，见 memory/known_gaps_upstream.md）**：宽松旗标前置条件（`--existing` 需 `- profile:` 声明）与 `gate_result.json` 落盘 · 内容指纹缓存（本仓仍是 1s TTL + 写后失效）· 压缩期工作笔记投递 · cue 投递加固 · audit Tier-0/1/2。
+- 验证：`bash script/linux/project_build.sh` exit 0 且 `lib/*.js` 与 `src/*.js` 逐字节一致 · `node --test tests/unit/*.test.js` **109/109** · `python3 tests/assert_artifacts.py --existing` **51/51** · 双对抗评审（R1 信任模型 needs-fix → 修复 9 项后复核）。
+
 ## 2026-10-21：W18 契约增量移植（批 2/3）
 
 - `tests/assert_artifacts.py` 刷成主线 canonical（22 标记；含 G3 债棘轮 `--record-debt`、G4 claim-lint 当前块 + `- claim-ack:`、G5 手打 hex lint、G6 `- wave-base:` 严格祖先校验）。
@@ -73,7 +85,8 @@ flowchart TD
 | **渐进披露契约段** | 紧凑契约卡（~2.1K tokens / 7.6KB，<8KB 上限；wave3 含 COV-12 双模式与任务类型路由，2026-09-30 含 COV-13 Class 声明与 §V11.9 渲染门）常驻上下文；skill 全文按需加载——替代全量强制注入（A/B 评测验证 token 用量显著下降） |
 | **验证器三段树（COV-5）** | 与主线同步：探针 `scripts/mm_probe.py` **随插件捆绑**（与 vibeweaver 字节一致），契约卡优先用自带副本、缺失时回退正源目录——PASS → `model-native [image]`（§A4.1.1 协议自读）；FAIL + mm-sensor → `mm-sensor [mode]`（独立打分）；都没有 → `direct read`（DOM/日志核验） |
 | **编码任务自动激活** | pre-step 意图启发式：仅对编码任务注入激活卡，非编码任务零成本 |
-| **机械门禁** | write/edit 后跑项目的 `assert_artifacts.py`，fail-closed（空壳脚本 / 检查器崩溃一律判 BAD）；`gate_mode: block \| warn \| off` 三档 |
+| **机械门禁** | write/edit 后跑 `assert_artifacts.py`，fail-closed（空壳脚本 / 检查器崩溃 / 非零退出却无结构化失败行一律判 BAD）；检查器副本 sha256 必须命中正源 pin，正源可用时优先跑正源；`gate_mode: block \| warn \| off` 三档（warn 自 w19.0 起真实生效：只提示不阻断） |
+| **执行前守卫（w19.0）** | `tools/pre-execute` 拦在工具派发之前：风险级路径写入/删除需 `tests/decisions.md` 批准行；破坏性命令表（全量 stage、`reset --hard`、`clean -fd`、丢弃整个工作树、`truncate`、递归删非白名单）；`- class: DOC` 却写源码直接拒；路径按 realpath + 悬空符号链接归一，`$HOME`/`$PWD` 不算白名单 |
 | **内容门禁（2026-08-28 主线同步；2026-09-30 扩至 18 组）** | assert 失败消息按证据语义归类 blocking：组 14-16（`secret scan` / `test-change` / `risk-tier`）+ 18 组新增（`DOC-asset render gate` / `exec-check`）+ 声明类证据缺失（`screenshot` / `media evidence`）+ §V11.7 `--class` 交叉校验（`contradicts the log`）——波次 diff 增行含凭据即拦（未加引号的安全引用值豁免）、删测试断言无 `- test-change:` 理由即拦、触及 auth/payment/migration 等高风险路径无 `tests/review_package.md` 即拦、office 资产无 `render:`/`exec-check:` 证据行即拦；Class 谎报由 assert `--class` 交叉校验与完工审计（C18）判 BAD（门禁路径自动识别 `- class:`，不判谎报） |
 | **回合守卫** | steer budget（默认 3）+ 机械化 stall observer（同一文件改 3 次无新增 PASS → 提示按 §A4.10 参数化换方向，防死循环） |
 | **压缩恢复** | compaction 后自动重建契约卡，长任务上下文不丢 |
