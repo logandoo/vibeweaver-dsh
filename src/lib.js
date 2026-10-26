@@ -790,11 +790,111 @@ export function protectedDeleteBlock(root, command) {
 // dsh-tool-pwsh: pwsh；dsh-tool-fs-search: glob/grep；dsh-tool-present: present；
 // dsh-tool-str-replace-editor: str_replace_editor）。未知名字按写面处理（fail-closed），
 // 只读面必须逐名列出——曾把 session_*/agent_* 写成通配，等于给未来工具发免检牌。
-const COMMAND_TOOL_RE = /^(?:bash|shell|terminal|zsh|fish|nu|pwsh|powershell|exec|run_command|command)$/i
-const READONLY_TOOL_RE = /^(?:read|read_file|read_image|view|cat|head|tail|list|ls|dir|list_dir|glob|grep|search|codesearch|find|status|skill|question|ask_user_question|present|todo_write|todo_write_many|web_fetch|web_search|ralph|job_list|job_output|job_kill|get_goal|create_goal|update_goal|list_subagent_models|interrupt_agent|send_message|task)$/i
+// 0.2.1-rc.3 命令面增量（A4）：run_code（dsh-tools/lib/index.js:955，参数 code，程序
+// 不经过任何工具）· working_directory{cd} · terminal_open/send/signal · create_worktree ·
+// schedule_create/update。逐个实测在册，**禁前缀通配**（通配 = 给未来工具发免检牌，
+// 本波刚以同样理由拆掉 session_*/agent_*）。`lsp` 不在此列：@deepseek-ai/dsh-tool-lsp
+// 参数 operation/file_path/line/character，是只读导航，进命令面等于每次查询跑一遍门禁。
+const COMMAND_TOOL_RE = /^(?:bash|shell|terminal|zsh|fish|nu|pwsh|powershell|exec|run_command|command|run_code|working_directory|create_worktree|schedule_create|schedule_update|terminal_open|terminal_send|terminal_signal)$/i
+const READONLY_TOOL_RE = /^(?:read|read_file|read_image|view|cat|head|tail|list|ls|dir|list_dir|glob|grep|search|codesearch|find|status|skill|question|ask_user_question|present|todo_write|todo_write_many|web_fetch|web_search|ralph|job_list|job_output|job_kill|get_goal|create_goal|update_goal|list_subagent_models|interrupt_agent|send_message|task|lsp)$/i
+
+// 命令面工具的"可执行文本"藏在不同参数名里（0.2.1-rc.3 实测）：shell 族 → command，
+// terminal_send → text，run_code → code（程序，另走 codeCommandTexts）。已知形态逐名
+// 在册，未知命令面名字仍兜底读 command —— 宁可多扫一段文本，不给静默盲区。
+const NO_SHELL_TEXT = new Set(["run_code", "working_directory", "create_worktree", "schedule_create", "schedule_update", "terminal_open", "terminal_signal"])
+const asText = (v) => (typeof v === "string" ? v : "")
 
 export function isCommandTool(name) {
   return COMMAND_TOOL_RE.test(String(name || ""))
+}
+
+/** 该工具参数里"等价于一次 shell 输入"的文本（取不到返回空串）。 */
+export function commandTextFromArgs(toolName, args) {
+  const name = String(toolName || "").toLowerCase()
+  if (!isCommandTool(name) || !args || typeof args !== "object") return ""
+  if (name === "terminal_send") return asText(args.text)
+  if (NO_SHELL_TEXT.has(name)) return ""
+  return asText(args.command)
+}
+
+/** run_code 的程序文本（python/typescript 源码，不是 shell；其余工具为空）。 */
+export function programTextFromArgs(toolName, args) {
+  if (String(toolName || "").toLowerCase() !== "run_code") return ""
+  if (!args || typeof args !== "object") return ""
+  return asText(args.code)
+}
+
+// 改目录的参数键：working_directory{cd}（dsh-tool-working-directory）与 terminal_open{cwd}。
+// 它们是路径不是命令，走提示通道；刻意不进 writePathFromArgs —— 进去等于"cd 出项目"
+// 在证据红时被 block，而门禁不该管走路。
+const DIR_TARGET_KEY = new Map([["working_directory", "cd"], ["terminal_open", "cwd"]])
+
+export function dirTargetFromArgs(toolName, args) {
+  const key = DIR_TARGET_KEY.get(String(toolName || "").toLowerCase())
+  if (!key || !args || typeof args !== "object") return null
+  const v = args[key]
+  return typeof v === "string" && v.trim() ? v.trim() : null
+}
+
+/** cd 到项目根之外 → 一行提示（不 deny）；项目内（含 cd 到根本身）完全静默。 */
+export function cwdEscapeNote(root, target, cwd) {
+  if (!root || !target) return null
+  const abs = path.isAbsolute(target) ? path.resolve(target) : path.resolve(cwd || root, target)
+  let rootReal = null
+  let absReal = null
+  try {
+    rootReal = resolveWritePath(root)
+    absReal = resolveWritePath(abs)
+  } catch {
+    return null
+  }
+  if (rootReal === absReal) return null
+  if (relativeUnderRoot(root, abs)) return null
+  return `[GATE-WARNING (vibeweaver-guard)] working_directory: 目录切到项目根之外（${target} → ${absReal}）。门禁与任务归属按项目根 ${rootReal} 的 tests/ 走，切出去之后本项目不再被覆盖——确认这是有意的目录切换，不是把上下文走丢了。`
+}
+
+// ── run_code 程序面（A4 的核心盲区）─────────────────────────────────────────
+// dsh-tools/lib/index.js:955/1170 把 code 直接交给 python/typescript 运行时，
+// `shutil.rmtree("src")` 因此绕开整张工具守卫表（只有子调用才过 pre-execute）。
+// 这里不新造判据：把程序里"等价于 shell 破坏动作"的片段抽成 shell 等价式，交回
+// destructiveBlock / riskCommandBlock / protectedDeleteBlock 同一张表判定 —— 白名单
+// 与 Class-E 批准行因此与 bash 面同源。抽不出来的一律不猜：这层是补盲区，不是解释器。
+const CODE_RECURSIVE_RE = [
+  // 无条件递归删除：shutil.rmtree/rmdir · os.removedirs · rimraf/rimrafSync
+  /(?:\bshutil\s*\.\s*rm(?:tree|rmdir)|\bos\s*\.\s*removedirs|\brimraf(?:Sync)?)\s*\(\s*(?<q>["'`])(?<t>(?:\\.|(?!\k<q>)[^\\])*)\k<q>/g,
+  // Node fs.rm / rmSync：带 recursive:true 才算递归（与 `rm` 不带 -r 同判：不拦）
+  /\bfs(?:Promises)?\s*\.\s*rm(?:Sync)?\s*\(\s*(?<q>["'`])(?<t>(?:\\.|(?!\k<q>)[^\\])*)\k<q>[^)]{0,160}?\brecursive\s*:\s*true/g,
+]
+const CODE_SHELL_RE = [
+  // 起 shell：os.system / os.popen · child_process.exec(Sync) · 裸 execSync / spawnSync
+  /(?:\bos\s*\.\s*(?:system|popen)|\bchild_process\s*\.\s*exec(?:Sync)?|\b(?:exec|execSync|spawnSync))\s*\(\s*(?<q>["'`])(?<t>(?:\\.|(?!\k<q>)[^\\])*)\k<q>/g,
+]
+const CODE_ARGV_RE = /\bsubprocess\s*\.\s*(?:run|call|check_output|check_call|Popen)\s*\(\s*\[(?<t>[^\]]*)\]/g
+const ARGV_ITEM_RE = /(["'`])((?:\\.|(?!\1)[^\\])*)\1/g
+
+export function codeCommandTexts(code) {
+  const out = []
+  if (typeof code !== "string" || !code) return out
+  const push = (t) => {
+    const v = String(t || "").trim()
+    if (v) out.push(v)
+  }
+  const text = (m) => (m && m.groups ? m.groups.t : "")
+  try {
+    for (const re of CODE_RECURSIVE_RE) {
+      for (const m of code.matchAll(re)) push(`rm -rf ${text(m)}`)
+    }
+    for (const re of CODE_SHELL_RE) {
+      for (const m of code.matchAll(re)) push(text(m))
+    }
+    for (const m of code.matchAll(CODE_ARGV_RE)) {
+      const argv = [...String(text(m)).matchAll(ARGV_ITEM_RE)].map((x) => x[2])
+      if (argv.length) push(argv.join(" "))
+    }
+  } catch {
+    return out
+  }
+  return out
 }
 export function isReadOnlyTool(name) {
   return READONLY_TOOL_RE.test(String(name || ""))
@@ -818,9 +918,12 @@ export function preExecuteDecision({ toolName, args, cwd, cfg = {} } = {}) {
   const isWrite = isWriteSurface(toolName)
   const target = isWrite ? writePathFromArgs(args) : null
   const abs = target ? (path.isAbsolute(target) ? target : path.resolve(cwd || process.cwd(), target)) : null
-  const command = isCommand && typeof (args || {}).command === "string" ? args.command : ""
+  // 三种参数形态分别取（A4）：shell 文本 / 程序文本 / 目录目标
+  const command = isCommand ? commandTextFromArgs(toolName, args) : ""
+  const program = isCommand ? programTextFromArgs(toolName, args) : ""
+  const dirTarget = isCommand ? dirTargetFromArgs(toolName, args) : null
   const conflict = isWrite && writePathConflict(args, cwd)
-  if (!abs && !command && !conflict) return out
+  if (!abs && !command && !program && !dirTarget && !conflict) return out
   const root = findProjectRoot([cwd, abs ? path.dirname(abs) : null])
   if (!root) return out
   const reasons = []
@@ -834,6 +937,16 @@ export function preExecuteDecision({ toolName, args, cwd, cfg = {} } = {}) {
   }
   if (command) {
     reasons.push(destructiveBlock(root, command), riskCommandBlock(root, command), protectedDeleteBlock(root, command))
+  }
+  if (program) {
+    // 程序里的破坏动作抽成 shell 等价式，判据与 bash 面同源
+    for (const synth of codeCommandTexts(program)) {
+      reasons.push(destructiveBlock(root, synth), riskCommandBlock(root, synth), protectedDeleteBlock(root, synth))
+    }
+  }
+  if (dirTarget) {
+    const note = cwdEscapeNote(root, dirTarget, cwd)
+    if (note) out.warn.push(note) // 提示级：合法 cd 不拦，但要让"门禁跟丢了"可见
   }
   const hits = reasons.filter(Boolean)
   if (cfg.gateMode === "warn") { out.warn = [...hits, ...out.warn]; return out }

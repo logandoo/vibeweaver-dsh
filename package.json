@@ -26,5 +26,8 @@
     "scripts/evidence_lock.py",
     "scripts/evidence_seal.py"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "engines": {
+    "dsh": ">=0.1.0-rc.6"
+  }
 }
