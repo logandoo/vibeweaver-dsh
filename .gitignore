@@ -17,3 +17,7 @@ tests/review/
 tests/bench/report.md
 tests/bench/bench_results.csv
 tests/bench/final_scores.json
+# 主线 w19.0 波：受保护证据与门禁运行态（本仓 work-state 约定，同 memory/ 不入库）
+tests/.evidence.lock
+tests/gate_result.json
+tests/working_note.md

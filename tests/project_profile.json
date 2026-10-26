@@ -1,0 +1,8 @@
+{
+  "profile": "library",
+  "description": "dsh (DeepSeek Harness) Cordis 插件 bundle — 无浏览器 UI；有 script/linux 生命周期脚本；存量项目（Modify-Existing）",
+  "ui": false,
+  "no_ui": true,
+  "no_service": false,
+  "no_new_project": true
+}

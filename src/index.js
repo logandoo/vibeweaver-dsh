@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url"
 import {
   writePathFromArgs,
   checkGate,
+  preExecuteDecision,
   blockMessage,
   stallObservation,
   isCodingIntent,
@@ -65,6 +66,10 @@ export function apply(ctx, config = {}) {
   const probeScript = existsSync(join(pluginRoot, "scripts", "mm_probe.py"))
     ? join(pluginRoot, "scripts", "mm_probe.py")
     : join(skillSourceDir, "scripts", "mm_probe.py")
+
+  // 贯穿给 lib.js 纯函数的配置面（checker pin 的正源解析 + 守卫的档位判定）
+  const gateCfg = { skillSourceDir, steerBudget, gateMode, probeScript }
+  const blockMode = () => gateMode !== "warn"
 
   // 会话级状态（瞬态；持久状态在项目 .vibeweaver/state.json 由 stallObservation 管理）
   const injectedAgents = new Set()
@@ -180,29 +185,57 @@ export function apply(ctx, config = {}) {
     }
   })
 
-  // ── 4. post-execute 门禁（write/edit）──
-  const postExecute = async (exec, result, next) => {
+  // ── 4a. pre-execute 守卫（主线 W1 移植：风险路径 pre-write 拦 + 破坏性命令守卫
+  // + DOC 类降级守卫）。dsh 的 deny 在工具执行前生效，是本插件唯一的执行前拦截面。
+  const deniedCalls = new Set() // 自己 deny 的 callId → post-execute 不再重复处理
+  ctx.on("tools/pre-execute", async (exec, next) => {
     if (!gateEnabled()) return next()
-    if (!GATED_TOOLS.has(exec.name)) return next()
+    if (process.env.VIBEWEAVER_GATE === "off") return next()
+    const sessionId = exec.agent?.session?.id
+    if (sessionId && disabledSessions.has(sessionId)) return next()
+    const cwd = exec.agent?.session?.header?.cwd
+    const d = preExecuteDecision({ toolName: exec.name, args: exec.arguments, cwd, cfg: gateCfg })
+    if (d.deny && blockMode()) {
+      if (exec.callId) deniedCalls.add(exec.callId)
+      return { kind: "deny", reason: d.deny }
+    }
+    return next()
+  })
+
+  // ── 4b. post-execute 门禁（write/edit + warn 档的守卫提示）──
+  const postExecute = async (exec, result, next) => {
+    if (exec.callId && deniedCalls.delete(exec.callId)) return next()
+    if (!gateEnabled()) return next()
+    if (!GATED_TOOLS.has(exec.name) && !(gateMode === "warn" && (exec.name === "bash" || exec.name === "shell"))) return next()
     if (process.env.VIBEWEAVER_GATE === "off") return next()
     const sessionId = exec.agent?.session?.id
     if (sessionId && disabledSessions.has(sessionId)) return next()
     const filePath = writePathFromArgs(exec.arguments) // W18: file_path/path/filePath 全拼写
-    const root = findProjectRoot(filePath)
+    const root = findProjectRoot([filePath, agentCwd(exec)])
     if (!root) return next()
     if (sessionId && result?.isError !== true) lastWriteAt.set(sessionId, Date.now())
     invalidateGateCache(root) // 写操作已落盘 → 缓存失效, 本次检查重跑
     // cue 投递提升于门之上（主线 wave16）：门红时恰是「动手前先读」必须在场
     // 的时刻——block 反馈与 accept 提示两路都携带。
     const cues = cueNotes(root, filePath)
-    const gate = checkGate(root)
+    const gate = checkGate(root, gateCfg)
     const base = () => ({ kind: "accept", content: result.content })
+    // warn 档：证据门禁与守卫一律不阻断，降级为写后可见提示（block 档才 deny/block）
+    const guardWarn = gateMode === "warn"
+      ? preExecuteDecision({ toolName: exec.name, args: exec.arguments, cwd: sessionId ? agentCwd(exec) : undefined, cfg: gateCfg }).warn
+      : []
     if (gate && gate.blocking.length) {
+      if (!blockMode()) {
+        return {
+          kind: "accept",
+          content: [...(result.content || []), { type: "text", text: "[GATE-WARNING (vibeweaver, gateMode=warn)] 证据门禁未过（不阻断）: " + gate.blocking.join("; ") }],
+        }
+      }
       const msg = blockMessage(root, gate)
       const text = cues.length ? msg + "\n" + cues.join("\n") : msg
       return { kind: "block", feedback: [{ type: "text", text }] }
     }
-    const warns = [...cues]
+    const warns = [...cues, ...guardWarn.map((m) => "[GATE-WARNING (vibeweaver-guard, gateMode=warn)] " + m)]
     if (gate && gate.warnings.length) {
       warns.push("[GATE-WARNING (vibeweaver)] non-blocking: " + gate.warnings.join("; ") + " — fix before the final [Verification Gate] line.")
     }
@@ -217,6 +250,8 @@ export function apply(ctx, config = {}) {
     return base()
   }
   ctx.on("tools/post-execute", postExecute)
+
+  const agentCwd = (exec) => exec?.agent?.session?.header?.cwd
 
   // ── 5. turn-stopping 守卫 ──
   ctx.on("agent/turn-stopping", (payload) => {
@@ -245,7 +280,7 @@ export function apply(ctx, config = {}) {
     const userStop = isStopDirective(lastUserText.get(sessionId))
     const positiveIncomplete = !!active && wroteAfterUser && !errorFence && !paused && !classE && !userStop
 
-    const gate = checkGate(root)
+    const gate = checkGate(root, gateCfg)
     const red = !!(gate && gate.blocking.length)
     if (!red && !positiveIncomplete) return
     const text = red ? STEER_TEXT : INCOMPLETE_STEER_TEXT
@@ -292,7 +327,7 @@ export function apply(ctx, config = {}) {
       const cwd = args?.cwd || exec.agent?.session?.header?.cwd
       const root = findProjectRoot(cwd)
       if (!root) return { pass: true, blocking: [], warnings: [] }
-      const gate = checkGate(root)
+      const gate = checkGate(root, gateCfg)
       if (!gate) return { pass: true, blocking: [], warnings: [] }
       return { pass: gate.blocking.length === 0, blocking: gate.blocking, warnings: gate.warnings }
     },
@@ -317,7 +352,7 @@ export function apply(ctx, config = {}) {
       const agentCwd = invocation.agent?.session?.header?.cwd
       const root = findProjectRoot(agentCwd)
       if (!root) return { kind: "success", text: "vibeweaver: 当前工作区非 vibeweaver-active（无 tests/verification_log.md），gate 不生效。" }
-      const gate = checkGate(root)
+      const gate = checkGate(root, gateCfg)
       if (!gate) return { kind: "success", text: "vibeweaver gate: PASS（证据齐）。" }
       return {
         kind: "success",
