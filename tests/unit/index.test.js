@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from "node:fs"
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { apply, name, inject } from "../../src/index.js"
@@ -367,4 +367,163 @@ test("M5: agent/disposed 清扫会话状态", async () => {
   const after = await ctx.fire("tools/post-execute", exec2, result, () => ({ kind: "accept", content: result.content }))
   assert.equal(after.kind, "block", "disposed 后禁用被清除, 门禁恢复")
   rmSync(root, { recursive: true, force: true })
+})
+
+// ── A1（BLOCKER-1）：消息源 kind 去 catch-all `plugin` ──────────────────────
+// 0.2.x 的 MessageSourceMap 只有 user/model/tool/system-prompt（dsh-llm/lib/types/
+// message.d.ts:101-108，注释 :97 "there is no shared catch-all `plugin` kind"）；
+// 写侧 dsh-session 只要求 kind 非空，读侧 dsh-session-persistence-jsonl/lib/worker.cjs:11641
+// 对 kind === "plugin" 抛 SessionFormatError → 注入过消息的会话再也读不回来。
+// 生产者的正确写法是声明自己的 kind（merge-extensible），这里 = dsh-vibeweaver。
+test("A1: 三处注入的 source.kind 恒为 dsh-vibeweaver（激活卡 / steer / 重建卡）", async () => {
+  const SOURCES = []
+  // 1) pre-step 激活卡（改 decision.messages）
+  ctx = makeCtx()
+  apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
+  const agent = makeAgent("s1")
+  const msg = (text) => ({ content: [{ type: "text", text }], source: { kind: "user" } })
+  const d1 = await ctx.fire("agent/pre-step", {
+    agent, messages: [msg("帮我修复登录 bug")], turn: 1, step: 0,
+  }, () => ({ kind: "enter", messages: [msg("x")] }))
+  SOURCES.push(["activation", d1.messages[d1.messages.length - 1].source])
+  // 2) turn-stopping steer（证据红项目 → 必 steer）
+  const root = makeActiveProject(true)
+  ctx = makeCtx()
+  apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
+  const agent2 = makeAgent("s2", root)
+  ctx.agents._register("s2", agent2)
+  await ctx.fire("agent/turn-stopping", { agent: agent2, turn: 1, signal: new AbortController().signal }, () => {})
+  SOURCES.push(["steer", ctx.steered[0].msg.source])
+  // 3) compaction 重建卡（agent.inject 侧通道）
+  ctx = makeCtx()
+  apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
+  const agent3 = makeAgent("s3")
+  ctx.agents._register("s3", agent3)
+  await ctx.emit("session/event", { id: "s3" }, { type: "compaction/end", data: {} })
+  SOURCES.push(["recover", ctx.injected[0].msg.source])
+
+  for (const [where, src] of SOURCES) {
+    assert.ok(src, `${where}: 注入缺少 source`)
+    assert.equal(src.kind, "dsh-vibeweaver", `${where}: source.kind 必须是生产者自有 kind`)
+    assert.ok(!("plugin" in src), `${where}: 不得再带 plugin 字段（0.2.x 读侧按 retired syntax 拒绝）`)
+  }
+  // 全文件级钉：源码里不再出现 catch-all 写法（判据 #1 的 grep 断言）
+  const entry = readFileSync(new URL("../../src/index.js", import.meta.url), "utf8")
+  assert.equal((entry.match(/kind:\s*"plugin"/g) || []).length, 0, 'src/index.js 仍出现 kind: "plugin"')
+  rmSync(root, { recursive: true, force: true })
+})
+
+// ── A5（MINOR）：compaction 失败不投"已压缩"重建卡 ─────────────────────────
+// compaction/end 载荷自 rc.6 起带 `error?: string`（dsh-compaction/lib/types/
+// types.d.ts:73-79）：失败的压缩同样以 end 收尾，此时上下文并未被压掉，投重建卡
+// 是假信号（还会挤掉真正的恢复时机）。
+test("A5: compaction/end 带 error → 不投重建卡；无 error → 照常投", async () => {
+  ctx = makeCtx()
+  apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
+  const agent = makeAgent("s5")
+  ctx.agents._register("s5", agent)
+  await ctx.emit("session/event", { id: "s5" }, { type: "compaction/end", data: { error: "summary request failed" } })
+  assert.equal(ctx.injected.length, 0, "压缩失败（data.error 在场）不得投重建卡")
+  await ctx.emit("session/event", { id: "s5" }, { type: "compaction/end", data: { compactionId: "c1" } })
+  assert.equal(ctx.injected.length, 1, "成功压缩仍要投重建卡")
+})
+
+// ── A6（MINOR）：契约段显式 interpolate: false ─────────────────────────────
+// 0.2.x 的 PromptSection.interpolate 默认 true（dsh-system-prompt/lib/types/index.d.ts:58-62），
+// 卡面今天恰好没有 `{{`/`}}` 属隐性不变量；显式化后宿主插值不会改写契约文本，
+// 且解除"卡面路径长度顶预算"的耦合。旧版忽略未知字段，安全。
+test("A6: 契约段注册显式 interpolate: false", () => {
+  ctx = makeCtx()
+  apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
+  const section = ctx.registered.sections[0]
+  assert.equal(section.name, "vibeweaver-covenant")
+  assert.equal(section.interpolate, false, "契约段必须显式关闭宿主插值")
+})
+
+// ── A2（BLOCKER-2）：有效工作目录跟工具面同源 ──────────────────────────────
+// 0.2.x 起会话可以 cd（working_directory{cd}），不可变的 session.header.cwd 保留原项目，
+// dsh-tool-fs 改读 ctx.workingDirectory.ensure(exec.agent)（lib/index.js:172）。门禁若仍
+// 只读 header.cwd，会话 cd 之后 findProjectRoot 找不到日志 → 门禁静默消失。
+// 夹具形态对齐真源：ctx.workingDirectory.get(session) 同步读 projection、无 I/O。
+function projectDir({ active = true } = {}) {
+  const root = mkdtempSync(join(tmpdir(), "vwcwd-"))
+  if (active) {
+    mkdirSync(join(root, "tests"), { recursive: true })
+    writeFileSync(join(root, "tests", "verification_log.md"), "")
+    writeFileSync(join(root, "tests", "acceptance.md"), "")
+  }
+  return root
+}
+
+function cwdProbeCtx(effective, { throws = false } = {}) {
+  const c = makeCtx()
+  // 与 cordis 的可选依赖读法对齐：ctx.reflect.get(name) 在服务缺失时返回 undefined。
+  c.reflect = {
+    get: (name) => {
+      if (name !== "workingDirectory") return undefined
+      return {
+        get: () => {
+          if (throws) throw new Error("projection unavailable")
+          return effective
+        },
+      }
+    },
+  }
+  return c
+}
+
+test("A2: header.cwd 与服务报不同目录时，门禁命中服务目录（turn-stopping + gate 工具）", async () => {
+  const dirA = projectDir({ active: false }) // header.cwd：非 vibeweaver 项目
+  const dirB = projectDir()                  // 服务报：会话 cd 后的真项目（证据红）
+  ctx = cwdProbeCtx(dirB)
+  apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
+  const agent = makeAgent("sA2", dirA)
+  ctx.agents._register("sA2", agent)
+  const signal = new AbortController().signal
+  const msg = (text) => ({ content: [{ type: "text", text }], source: { kind: "user" } })
+  await ctx.fire("agent/pre-step", { agent, messages: [msg("实现功能")], turn: 1, step: 0, signal }, () => ({ kind: "enter", messages: [] }))
+  await ctx.fire("agent/turn-stopping", { agent, turn: 1, signal }, () => {})
+  assert.equal(ctx.steered.length, 1, "服务目录是活跃项目 → 必须 steer（现网读 header.cwd 会判非项目）")
+
+  const value = await ctx.registered.tools["vibeweaver_gate"].execute({}, { agent })
+  assert.equal(value.pass, false, "gate 工具默认工作目录同样必须走服务")
+  rmSync(dirA, { recursive: true, force: true })
+  rmSync(dirB, { recursive: true, force: true })
+})
+
+test("A2: 服务缺失（rc.6/rc.3）→ 回退 header.cwd，门禁照常生效", async () => {
+  const dirB = projectDir()
+  ctx = makeCtx() // 无 ctx.reflect → 无 workingDirectory 服务（0.1.x 形状）
+  apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
+  const agent = makeAgent("sA2b", dirB)
+  ctx.agents._register("sA2b", agent)
+  const signal = new AbortController().signal
+  const msg = (text) => ({ content: [{ type: "text", text }], source: { kind: "user" } })
+  await ctx.fire("agent/pre-step", { agent, messages: [msg("实现功能")], turn: 1, step: 0, signal }, () => ({ kind: "enter", messages: [] }))
+  await ctx.fire("agent/turn-stopping", { agent, turn: 1, signal }, () => {})
+  assert.equal(ctx.steered.length, 1, "旧版语义必须原样保留")
+  const value = await ctx.registered.tools["vibeweaver_gate"].execute({}, { agent })
+  assert.equal(value.pass, false)
+  rmSync(dirB, { recursive: true, force: true })
+})
+
+test("A2: 服务抛错 → 回退 header.cwd（宿主子系统故障不得让门禁消失，也不得让写入抛栈）", async () => {
+  const dirB = projectDir()
+  ctx = cwdProbeCtx(dirB, { throws: true })
+  apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
+  const agent = makeAgent("sA2c", dirB)
+  ctx.agents._register("sA2c", agent)
+  const signal = new AbortController().signal
+  const msg = (text) => ({ content: [{ type: "text", text }], source: { kind: "user" } })
+  await ctx.fire("agent/pre-step", { agent, messages: [msg("实现功能")], turn: 1, step: 0, signal }, () => ({ kind: "enter", messages: [] }))
+  await ctx.fire("agent/turn-stopping", { agent, turn: 1, signal }, () => {})
+  assert.equal(ctx.steered.length, 1, "服务抛错时 header.cwd 兜底")
+  rmSync(dirB, { recursive: true, force: true })
+})
+
+test("A2: 服务不进 inject（0.1.x 上会让整个插件 INACTIVE）", () => {
+  // cordis _refresh(): 任一 inject 名无实现 → epoch=INACTIVE → _unload()。
+  // rc.6/rc.3 没有 workingDirectory 服务，声明它 = 插件在旧版上静默不加载。
+  assert.ok(!inject.includes("workingDirectory"), "workingDirectory 必须走可选读，不能声明为必需服务")
+  assert.ok(inject.includes("tools"), "inject 面其余项不动")
 })
