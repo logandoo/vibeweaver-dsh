@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { apply, name, inject } from "../../src/index.js"
+import { invalidateGateCache } from "../../src/lib.js"
 
 let ctx = null
 
@@ -354,6 +355,27 @@ test("B3: 首次写入投重入指针，第二次不再投（遥测记 1 次）"
   assert.ok(!/working_note\.md 在场/.test((d2.content || []).map((c) => c.text || "").join("\n")), "第二次不再投")
   const st = JSON.parse(readFileSync(join(root, ".vibeweaver", "state.json"), "utf8"))
   assert.equal(st.memoryDeliveries.sessionCue, 1, "遥测应记 1 次")
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("B3: 被门禁拦下的首写不消费指针，下一次被接受的写入才投", async () => {
+  const root = makeActiveProject(true) // 证据红 → 首写会被 block
+  writeFileSync(join(root, "tests", "working_note.md"), "# 账本\n- x\n")
+  ctx = makeCtx()
+  apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
+  const agent = makeAgent("sRed", root)
+  ctx.agents._register("sRed", agent)
+  const result = { isError: false, content: [{ type: "text", text: "ok" }], value: {} }
+  const exec = (id) => ({ name: "write", arguments: { file_path: join(root, "src", "a.js") }, agent, callId: id })
+  const d1 = await ctx.fire("tools/post-execute", exec("r1"), result, () => ({ kind: "accept", content: result.content }))
+  assert.equal(d1.kind, "block", "证据红时首写被拦")
+  // 修好证据后（直接改盘 + 失效缓存），下一次写入必须拿到那条指针
+  writeFileSync(join(root, "tests", "verification_log.md"), "## Task\n- iter 1 PASS: x (evidence: tests/acceptance.md, 1/1)\n")
+  writeFileSync(join(root, "tests", "acceptance.md"), "> cap=5  stall=3×\n") // 证据要真的变绿，两件都得在
+  invalidateGateCache(root)
+  const d2 = await ctx.fire("tools/post-execute", exec("r2"), result, () => ({ kind: "accept", content: result.content }))
+  const text = (d2.content || []).map((c) => c.text || "").join("\n")
+  assert.match(text, /working_note\.md 在场/, "被拦那次不得消费指针")
   rmSync(root, { recursive: true, force: true })
 })
 
