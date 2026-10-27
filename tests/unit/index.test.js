@@ -374,6 +374,9 @@ test("A3: package.json 的 engines.dsh 有上限（无上限 = 对未知大版�
   const range = pkg.engines?.dsh || ""
   assert.match(range, />=\S+/, "要有下限")
   assert.match(range, /<\S+/, "要有上限（0.3 之前必须重新评估）")
+  // 精确到当前约定值：只查"有没有 <"会让错误的 `<0.2.0` 通过（FCV 复核实证）。
+  // 要改上限，先改这条测试——这正是"必须重新评估"的可审计点。
+  assert.equal(range, ">=0.1.0-rc.6 <0.3.0")
 })
 
 test("B3: 首次写入投重入指针，第二次不再投（遥测记 1 次）", async () => {

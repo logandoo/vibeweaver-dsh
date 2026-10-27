@@ -130,7 +130,9 @@ test("B2: 手搓/旧版快照没有 acc 指纹 → fail-closed（不信任）", 
 
 test("B1: 无笔记分支也守字节预算（中文验收首行不膨胀）", () => {
   const root = project()
-  writeFileSync(join(root, "tests", "acceptance.md"), "> cap=5  stall=3×\n" + "很长的中文验收判据。".repeat(400) + "\n")
+  // 关键：超长内容必须在**含 cap=5 的那一行**上——capLine 提取的就是这一行，
+  // 放到第二行等于没测到（FCV 复核：原夹具因此对回退无感）。
+  writeFileSync(join(root, "tests", "acceptance.md"), "> cap=5  stall=3× " + "很长的中文验收判据。".repeat(400) + "\n")
   const bundle = compactStateBundle(root)
   assert.ok(Buffer.byteLength(bundle, "utf8") <= 4096, `got ${Buffer.byteLength(bundle, "utf8")}`)
   rmSync(root, { recursive: true, force: true })

@@ -16,7 +16,7 @@
 | 10 | B3 首次写入投指针、第二次不投、遥测可查 | 钩子层钉（两次写入 + 读 `.vibeweaver/state.json`）+ 遥测累加钉（不覆盖 ops） | tests/unit/index.test.js · tests/unit/context.test.js | covered |
 | 11 | B4 子代理会话不投激活卡 | 单测（origin=subagent 不投；parentSession-only 仍投；无 header 不投）+ 钩子层 | 同上 | covered |
 | 12 | B5 卡面补 §V9/§V12 且 12 组合 <8000B | 词面钉 + 四配置 × 三档实测 7789-7940B | tests/unit/context.test.js · tests/unit/w19_guards.test.js | covered |
-| 13 | 全套绿 | unit 165/165 · poc 26 例 · 两探针（rc.4）· build 0 且 lib==src · `assert --existing --final` | tests/dsh-b-*.log · tests/dsh-final-*.log | 收官跑（见 verification_log） |
+| 13 | 全套绿 | unit 176/176 · poc 26 例 · 两探针（rc.4）· build 0 且 lib==src · `assert --existing --final` | tests/dsh-b-*.log · tests/dsh-final-*.log | 收官跑（见 verification_log） |
 
 ## 独立评审修复（3 Important + 5 Minor）
 
