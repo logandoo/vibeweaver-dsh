@@ -12,7 +12,7 @@
 - **真实会话 E2E（判据 #7 补齐）**：真 dsh 0.2.1-rc.4 跑编码任务 → 插件注入 1 条 `{id:<uuid>, role:"user", source:{kind:"dsh-vibeweaver"}}` → `--session-id` 重载 **0 处 corrupt**；两个负对照在真二进制上分别报 `producer-owned source kind`（旧 kind）与 `lacks an identified message`（去掉 id/role）。冒烟 (3) 因此从"永远 SKIP"变成真断言（无凭据时仍如实 SKIP）。
 - **波次 B（上下文管理移植）**：B1 压缩边界投**工作笔记原文**（≤4KB，超长截断）而不是三行静态文案；B2 写笔记时留**磁盘快照**，笔记被蒸馏删除后仍能投；B3 每根/每会话**首次写入**投一行重入指针 + 投递遥测（`.vibeweaver/state.json`，且修掉了 stall observer 会整对象重置、把遥测一起抹掉的缺陷）；B4 **子代理会话不投激活卡**（`header.origin === "subagent"`，刻意不用 fork 血缘判定）；B5 卡面补 `§V9 收官顺序` / `§V12 合法停止`，四路径 × 三档 12 组合实测 **7789-7940B**。
 - **遗留项收口**：`engines.dsh` 加**上限** `<0.3.0`（真机验证：低于/高于范围时 dsh 会 skip 该 bundle 并给豁免命令）；四类守卫盲区补齐——`/bin/rm` 绝对路径、反斜杠续行、`require('rimraf').sync`、`os.exec*` 的 argv `-c` 载荷（每条都有"改动前失败"的 RED 钉）。
-- **验证**：unit **171/171**；守卫 PoC 26 例；上游 v4 admission 探针与真 cordis 探针在 rc.4 上 PASS；`assert_artifacts.py --existing` 59/59。
+- **验证**：unit **176/176**；守卫 PoC 26 例；上游 v4 admission 探针与真 cordis 探针在 rc.4 上 PASS；`assert_artifacts.py --existing` 59/59。
 
 ## 2026-10-26：dsh 0.2.1-rc.3 兼容波次 A（两条 BLOCKER + 守卫面补全）
 

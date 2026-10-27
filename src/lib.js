@@ -1269,7 +1269,8 @@ export function snapshotTextOf(root) {
     const d = JSON.parse(safeRead(p) || "null")
     if (!d || typeof d.text !== "string") return ""
     // 跨任务失效：验收判据在快照之后变过 → 这是上一个任务的账本，不得当作"权威"
-    if (typeof d.acc === "string" && d.acc && d.acc !== acceptanceFingerprint(root)) return ""
+    // fail-closed：没有 acc（旧快照/手搓快照）一律作废——宁可少投，不把上一任务的下一步当权威
+    if (typeof d.acc !== "string" || !d.acc || d.acc !== acceptanceFingerprint(root)) return ""
     return capUtf8(d.text, MEMORY_BUNDLE_MAX)
   } catch {
     return ""
@@ -1296,11 +1297,15 @@ export function compactStateBundle(root) {
   if (!note) {
     const acc = safeRead(path.join(root, "tests", "acceptance.md"))
     const capLine = (acc.split("\n").find((l) => l.includes("cap=5")) || "").trim()
-    return [
-      "【vibeweaver 压缩恢复】本任务没有 tests/working_note.md：",
-      "下一次编辑前先重读 tests/acceptance.md 与 tests/verification_log.md 末尾 20 行，并建立 tests/working_note.md（§A7.15 假设账本 ≤50 行）。",
-      capLine ? `验收首行：${capLine}` : "",
-    ].filter(Boolean).join("\n").slice(0, MEMORY_BUNDLE_MAX)
+    // 无笔记分支同样按**字节**截断（FCV 实证：中文验收首行曾让这里产出 12KB）
+    return capUtf8(
+      [
+        "【vibeweaver 压缩恢复】本任务没有 tests/working_note.md：",
+        "下一次编辑前先重读 tests/acceptance.md 与 tests/verification_log.md 末尾 20 行，并建立 tests/working_note.md（§A7.15 假设账本 ≤50 行）。",
+        capLine ? `验收首行：${capLine}` : "",
+      ].filter(Boolean).join("\n"),
+      MEMORY_BUNDLE_MAX,
+    )
   }
   return [
     "【vibeweaver 工作状态】机器投递；这份账本是任务状态，优先于被压缩的摘要：",

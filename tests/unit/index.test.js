@@ -340,6 +340,42 @@ test("B1/B2: compaction 投工作笔记原文；笔记被删后投快照", async
   rmSync(root, { recursive: true, force: true })
 })
 
+test("B4: 子代理会话的压缩边界也不投上下文 bundle", async () => {
+  const root = makeActiveProject(false)
+  writeFileSync(join(root, "tests", "working_note.md"), "# 账本\n- 子代理不该看见这行\n")
+  ctx = makeCtx()
+  apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
+  const child = makeAgent("sChildComp", root)
+  child.session.header.origin = "subagent"
+  ctx.agents._register("sChildComp", child)
+  await ctx.emit("session/event", { id: "sChildComp" }, { type: "compaction/end", data: {} })
+  assert.equal(ctx.injected.length, 0, "子代理会话不得收到压缩 bundle")
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("B3: warn 档 + 证据红也要投首次指针（原来被门禁降级分支吞掉）", async () => {
+  const root = makeActiveProject(true)
+  writeFileSync(join(root, "tests", "working_note.md"), "# 账本\n- x\n")
+  ctx = makeCtx()
+  apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2, gateMode: "warn" })
+  const agent = makeAgent("sWarn", root)
+  ctx.agents._register("sWarn", agent)
+  const result = { isError: false, content: [{ type: "text", text: "ok" }], value: {} }
+  const d = await ctx.fire("tools/post-execute",
+    { name: "write", arguments: { file_path: join(root, "src", "a.js") }, agent, callId: "w1" },
+    result, () => ({ kind: "accept", content: result.content }))
+  const text = (d.content || []).map((c) => c.text || "").join("\n")
+  assert.match(text, /working_note\.md 在场/, "warn 档同样要投首次指针")
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("A3: package.json 的 engines.dsh 有上限（无上限 = 对未知大版本免检）", () => {
+  const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"))
+  const range = pkg.engines?.dsh || ""
+  assert.match(range, />=\S+/, "要有下限")
+  assert.match(range, /<\S+/, "要有上限（0.3 之前必须重新评估）")
+})
+
 test("B3: 首次写入投重入指针，第二次不再投（遥测记 1 次）", async () => {
   const root = makeActiveProject(false)
   writeFileSync(join(root, "tests", "working_note.md"), "# 账本\n- x\n")

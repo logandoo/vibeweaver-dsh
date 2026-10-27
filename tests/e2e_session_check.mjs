@@ -42,18 +42,15 @@ const rowsOf = (p) => {
   return raw.split("\n").filter(Boolean).map((l) => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
 }
 
-let found = null
-let scanned = 0
-for (const s of sessions) {
-  const rows = rowsOf(join(s.p, "session.v4.jsonl.zstd"))
-  scanned += 1
-  const mine = rows.filter((r) => r.type === "user/message" && r.data?.source?.kind === "dsh-vibeweaver")
-  if (mine.length) { found = { session: s.n, rows, mine }; break }
-}
-if (!found) {
-  console.log(`FAIL: 扫了 ${scanned} 个会话，没有任何 source.kind === "dsh-vibeweaver" 的注入消息`)
+// 只看**本轮最新**的那个会话：扫遍全部会让"旧会话合规"掩盖"本轮会话不合规"（FCV 实证的假 PASS）
+const newest = sessions[0]
+const rows = rowsOf(join(newest.p, "session.v4.jsonl.zstd"))
+const mine = rows.filter((r) => r.type === "user/message" && r.data?.source?.kind === "dsh-vibeweaver")
+if (!mine.length) {
+  console.log(`FAIL: 本轮最新会话 ${newest.n} 里没有 source.kind === "dsh-vibeweaver" 的注入消息（共 ${rows.length} 行）`)
   process.exit(1)
 }
+const found = { session: newest.n, rows, mine }
 const bad = found.mine.filter((r) => typeof r.data?.id !== "string" || !r.data.id || r.data.role !== "user")
 if (bad.length) {
   console.log(`FAIL: ${found.session} 有 ${found.mine.length} 条注入，其中 ${bad.length} 条缺 id/role（读侧会报 lacks an identified message）`)

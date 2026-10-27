@@ -339,7 +339,18 @@ export function apply(ctx, config = {}) {
     const cues = cueNotes(root, filePath)
     // B2：写工作笔记时留快照（笔记随后被蒸馏删除属正常动作，压缩边界还要投它）
     if (/(^|\/)working_note\.md$/.test(filePath || "")) snapshotWorkingNote(root)
-    const memoryWarns = []
+    // B3 的指针在**真正投出**时才算消费（warn 档 / 正常档都投；被拦那次不消费）
+    let takeCue = () => {
+      const touchKey = `${root}:${sessionId || "(session)"}`
+      if (firstTouch.has(touchKey)) return []
+      const cue = resumeCueNote(root)
+      if (!cue) return []
+      snapshotWorkingNote(root) // 删除窗口之前先留快照
+      firstTouch.add(touchKey)
+      capBoundedCollection(firstTouch)
+      recordMemoryDelivery(root, "sessionCue")
+      return [cue]
+    }
     const gate = checkGate(root, gateCfg)
     const base = () => ({ kind: "accept", content: result.content })
     // warn 档：证据门禁与守卫一律不阻断，降级为写后可见提示（block 档才 deny/block）
@@ -353,29 +364,19 @@ export function apply(ctx, config = {}) {
       : []
     if (gate && gate.blocking.length) {
       if (!blockMode()) {
+        // warn 档：门禁降级为提示，但首次 touch 指针仍要投（FCV 实证：这里曾把它吞掉）
+        const cueWarn = takeCue()
         return {
           kind: "accept",
-          content: [...(result.content || []), { type: "text", text: "[GATE-WARNING (vibeweaver, gateMode=warn)] 证据门禁未过（不阻断）: " + gate.blocking.join("; ") }],
+          content: [...(result.content || []), ...cueWarn.map((t) => ({ type: "text", text: t })), { type: "text", text: "[GATE-WARNING (vibeweaver, gateMode=warn)] 证据门禁未过（不阻断）: " + gate.blocking.join("; ") }],
         }
       }
       const msg = blockMessage(root, gate)
       const text = cues.length ? msg + "\n" + cues.join("\n") : msg
       return { kind: "block", feedback: [{ type: "text", text }] }
     }
-    // B3：每根/每会话首次写入投一行重入指针（第二次不再投），并记遥测。
-    // 放在 gate 阻断之后：被拦下的那次不消费标记，否则提示会被"消费掉但没投出"（自查缺陷）。
-    const touchKey = `${root}:${sessionId || "(session)"}`
-    if (!firstTouch.has(touchKey)) {
-      const cue = resumeCueNote(root)
-      if (cue) {
-        snapshotWorkingNote(root) // 删除窗口之前先留快照
-        firstTouch.add(touchKey)
-        capBoundedCollection(firstTouch)
-        recordMemoryDelivery(root, "sessionCue")
-        memoryWarns.push(cue)
-      }
-    }
-    const warns = [...cues, ...memoryWarns, ...guardWarn.map((m) => "[GATE-WARNING (vibeweaver-guard, gateMode=warn)] " + m)]
+    // B3 的指针在**真正投出**时才算消费（warn 档 / 正常档都要投；被拦那次不消费）
+    const warns = [...cues, ...takeCue(), ...guardWarn.map((m) => "[GATE-WARNING (vibeweaver-guard, gateMode=warn)] " + m)]
     if (gate && gate.warnings.length) {
       warns.push("[GATE-WARNING (vibeweaver)] non-blocking: " + gate.warnings.join("; ") + " — fix before the final [Verification Gate] line.")
     }
@@ -512,6 +513,8 @@ export function apply(ctx, config = {}) {
     const agent = ctx.agents.get(sessionId)
     if (!agent) return
     // B1/B2：压缩边界投**工作笔记原文**（≤4KB）；笔记已删则投快照；都没有才回退静态文案
+    // B4：子代理会话同样不投上下文 bundle（FCV 实证：原来只挡了激活卡）
+    if (isChildSession(agent)) return
     const root = findProjectRoot(rootHints(agent))
     if (!root) {
       agent.inject(injectedUserMessage(RECOVER_TEXT))
