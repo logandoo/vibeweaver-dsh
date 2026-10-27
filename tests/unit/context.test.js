@@ -1,7 +1,7 @@
 // 波次 B（上下文管理移植）单测钉：压缩边界投工作笔记原文 / 快照兜底 / 卡面新增义务。
 import test from "node:test"
 import assert from "node:assert/strict"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import {
@@ -58,6 +58,18 @@ test("B2: 笔记被删（蒸馏是正常动作）→ 仍能投出快照", () => 
   const bundle = compactStateBundle(root)
   assert.ok(bundle.includes("快照这条要留住"), "压缩边界仍要投出快照内容")
   assert.match(bundle, /快照/, "并说明这是 harness 快照")
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("B2: 笔记被做成指向项目外的符号链接 → 不读、不快照、不投", () => {
+  const root = project()
+  const outside = join(mkdtempSync(join(tmpdir(), "vwout-")), "secret.md")
+  writeFileSync(outside, "PROJECT-OUTSIDE-SECRET\n")
+  symlinkSync(outside, join(root, "tests", "working_note.md"))
+  assert.equal(workingNoteOf(root).trim(), "", "符号链接指向项目外时视为无笔记")
+  snapshotWorkingNote(root)
+  assert.equal(snapshotTextOf(root), "", "不得把项目外内容写进快照")
+  assert.ok(!compactStateBundle(root).includes("PROJECT-OUTSIDE-SECRET"), "更不得投进模型上下文")
   rmSync(root, { recursive: true, force: true })
 })
 

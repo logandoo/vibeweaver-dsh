@@ -1185,7 +1185,15 @@ const MEMORY_STATE_CAP = 500
 const SNAPSHOT_FILE = "memory-snapshot.json"
 
 export function workingNoteOf(root) {
-  return safeRead(path.join(root, "tests", "working_note.md")).replace(/\r\n/g, "\n")
+  const p = path.join(root, "tests", "working_note.md")
+  // 符号链接安全：笔记被做成指向项目外的链接时，不读、不快照、不投进模型上下文
+  // （快照会落 .vibeweaver/ 并随压缩边界投递，等于把外部文件内容带进会话）。
+  try {
+    if (!relativeUnderRoot(root, resolveWritePath(p))) return ""
+  } catch {
+    return ""
+  }
+  return safeRead(p).replace(/\r\n/g, "\n")
 }
 
 /** 写入时留存（best-effort）：笔记被删/蒸馏后，压缩边界仍有东西可投。 */
