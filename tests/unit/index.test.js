@@ -321,6 +321,57 @@ test("vibe 命令: handler 输出状态; off 置位禁用", async () => {
   rmSync(root, { recursive: true, force: true })
 })
 
+// ── 波次 B：压缩投笔记原文 / 首次 touch / 子会话排除 ──────────────────────
+test("B1/B2: compaction 投工作笔记原文；笔记被删后投快照", async () => {
+  const root = makeActiveProject(false)
+  writeFileSync(join(root, "tests", "working_note.md"), "# 账本\n- 关键: 压缩后要看见这行\n")
+  ctx = makeCtx()
+  apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
+  const agent = makeAgent("sComp", root)
+  ctx.agents._register("sComp", agent)
+  await ctx.emit("session/event", { id: "sComp" }, { type: "compaction/end", data: {} })
+  assert.match(ctx.injected[0].msg.content[0].text, /压缩后要看见这行/, "压缩边界必须投笔记原文")
+  rmSync(join(root, "tests", "working_note.md"))
+  await ctx.emit("session/event", { id: "sComp" }, { type: "compaction/end", data: {} })
+  const t2 = ctx.injected[1].msg.content[0].text
+  assert.match(t2, /压缩后要看见这行/, "笔记被删（蒸馏属正常动作）后仍要投快照")
+  assert.match(t2, /快照/)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("B3: 首次写入投重入指针，第二次不再投（遥测记 1 次）", async () => {
+  const root = makeActiveProject(false)
+  writeFileSync(join(root, "tests", "working_note.md"), "# 账本\n- x\n")
+  ctx = makeCtx()
+  apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
+  const agent = makeAgent("sCue", root)
+  ctx.agents._register("sCue", agent)
+  const result = { isError: false, content: [{ type: "text", text: "ok" }], value: {} }
+  const exec = (id) => ({ name: "write", arguments: { file_path: join(root, "src", "a.js") }, agent, callId: id })
+  const d1 = await ctx.fire("tools/post-execute", exec("c1"), result, () => ({ kind: "accept", content: result.content }))
+  assert.match((d1.content || []).map((c) => c.text || "").join("\n"), /working_note\.md 在场/, "首次写入要投指针")
+  const d2 = await ctx.fire("tools/post-execute", exec("c2"), result, () => ({ kind: "accept", content: result.content }))
+  assert.ok(!/working_note\.md 在场/.test((d2.content || []).map((c) => c.text || "").join("\n")), "第二次不再投")
+  const st = JSON.parse(readFileSync(join(root, ".vibeweaver", "state.json"), "utf8"))
+  assert.equal(st.memoryDeliveries.sessionCue, 1, "遥测应记 1 次")
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("B4: 子代理会话不投激活卡，普通会话照投", async () => {
+  ctx = makeCtx()
+  apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
+  const msg = (text) => ({ content: [{ type: "text", text }], source: { kind: "user" } })
+  const child = makeAgent("sChild")
+  child.session.header.origin = "subagent"
+  const d1 = await ctx.fire("agent/pre-step", { agent: child, messages: [msg("修复登录 bug")], turn: 1, step: 0 },
+    () => ({ kind: "enter", messages: [msg("x")] }))
+  assert.ok(!d1.messages.some((m) => m.content.some((c) => (c.text || "").includes("vibeweaver"))), "子代理不得注入")
+  const normal = makeAgent("sNormal")
+  const d2 = await ctx.fire("agent/pre-step", { agent: normal, messages: [msg("修复登录 bug")], turn: 1, step: 0 },
+    () => ({ kind: "enter", messages: [msg("x")] }))
+  assert.ok(d2.messages.some((m) => m.content.some((c) => (c.text || "").includes("vibeweaver"))), "普通会话照投")
+})
+
 test("compaction/end: 触发重建注入", async () => {
   ctx = makeCtx()
   apply(ctx, { skillSourceDir: "/tmp/skills", steerBudget: 2 })
@@ -421,7 +472,7 @@ test("A1: 三处注入的 source.kind 恒为 dsh-vibeweaver（激活卡 / steer 
   // 全文件级钉：源码里不再出现 catch-all 写法（判据 #1 的 grep 断言）
   const entry = readFileSync(new URL("../../src/index.js", import.meta.url), "utf8")
   assert.equal((entry.match(/kind:\s*"plugin"/g) || []).length, 0, 'src/index.js 仍出现 kind: "plugin"')
-  assert.equal((entry.match(/injectedUserMessage\(/g) || []).length, 3, "三处注入必须全走信封工厂，不得有裸消息字面量")
+  assert.ok((entry.match(/injectedUserMessage\(/g) || []).length >= 3, "注入必须全走信封工厂（≥3 处：激活/steer/重建）")
   rmSync(root, { recursive: true, force: true })
 })
 
