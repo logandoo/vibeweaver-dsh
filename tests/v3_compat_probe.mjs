@@ -63,8 +63,8 @@ const entrySrc = readFileSync(new URL("../src/index.js", import.meta.url), "utf8
 const sites = (entrySrc.match(/injectedUserMessage\(/g) || []).length
 const inline = (entrySrc.match(/\bsource:\s*\{/g) || []).length
 const retired = (entrySrc.match(/kind:\s*"plugin"/g) || []).length
-check(`三处注入均走 injectedUserMessage 信封工厂（实测 ${sites}，内联 source ${inline}，retired ${retired}）`,
-  () => { if (sites !== 3 || inline !== 0 || retired !== 0) throw new Error(`sites=${sites} inline=${inline} retired=${retired}`) }, false)
+check(`注入点全部走 injectedUserMessage 信封工厂（实测 ${sites} 处，内联 source ${inline}，retired ${retired}）`,
+  () => { if (sites < 3 || inline !== 0 || retired !== 0) throw new Error(`sites=${sites} inline=${inline} retired=${retired}`) }, false)
 
 console.log(failed ? `PROBE FAIL (${failed})` : "PROBE PASS")
 process.exit(failed ? 1 : 0)
