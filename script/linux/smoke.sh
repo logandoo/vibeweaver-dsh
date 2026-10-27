@@ -78,8 +78,9 @@ if [ "$supports_reload" = no ] && $DSH_BIN --profile "$PROFILE" --help 2>&1 | gr
 fi
 echo "[SMOKE] dsh $ver 支持 --session-id: $supports_reload"
 if [ "$supports_reload" = yes ]; then
-  E2E_OUT="$(node tests/e2e_session_check.mjs "$SESSION_ROOT" "$SLUG" "$START_TS" 2>&1)"
-  E2E_RC=$?
+  # `set -e` 下赋值里的命令替换会透传退出码（评审实证：rc=2 直接终止，SKIP/FAIL 分支成死代码）
+  E2E_RC=0
+  E2E_OUT="$(node tests/e2e_session_check.mjs "$SESSION_ROOT" "$SLUG" "$START_TS" 2>&1)" || E2E_RC=$?
   echo "$E2E_OUT"
   SID="$(printf '%s\n' "$E2E_OUT" | sed -n 's/^SESSION=//p' | head -1)"
   if [ "$E2E_RC" = "0" ]; then

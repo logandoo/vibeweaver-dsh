@@ -1,7 +1,7 @@
 // 波次 B（上下文管理移植）单测钉：压缩边界投工作笔记原文 / 快照兜底 / 卡面新增义务。
 import test from "node:test"
 import assert from "node:assert/strict"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import {
@@ -34,10 +34,23 @@ test("B1: 有工作笔记 → 压缩边界投**原文**（不是三行静态文�
   rmSync(root, { recursive: true, force: true })
 })
 
-test("B1: 超长笔记被截断到 4KB 以内（不是无限投递）", () => {
-  const root = project({ note: "x".repeat(9000) })
+test("B1: 超长笔记按**字节**截断到 4KB（中文/emoji 也是）", () => {
+  for (const note of ["x".repeat(9000), "中文笔记内容。".repeat(2000), "📝".repeat(3000)]) {
+    const root = project({ note })
+    const bundle = compactStateBundle(root)
+    const bytes = Buffer.byteLength(bundle, "utf8")
+    assert.ok(bytes <= 4096, `got ${bytes} bytes for a ${Buffer.byteLength(note, "utf8")}-byte note`)
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("B1: 30MB 笔记只读头部，不整文件扫（读取有上限）", () => {
+  const root = project({ note: "x".repeat(30 * 1024 * 1024) })
+  const t0 = Date.now()
   const bundle = compactStateBundle(root)
-  assert.ok(Buffer.byteLength(bundle, "utf8") <= 4096, `got ${Buffer.byteLength(bundle, "utf8")}`)
+  const ms = Date.now() - t0
+  assert.ok(Buffer.byteLength(bundle, "utf8") <= 4096)
+  assert.ok(ms < 2000, `took ${ms}ms`)
   rmSync(root, { recursive: true, force: true })
 })
 
@@ -71,6 +84,38 @@ test("B2: 笔记被做成指向项目外的符号链接 → 不读、不快照�
   assert.equal(snapshotTextOf(root), "", "不得把项目外内容写进快照")
   assert.ok(!compactStateBundle(root).includes("PROJECT-OUTSIDE-SECRET"), "更不得投进模型上下文")
   rmSync(root, { recursive: true, force: true })
+})
+
+test("B2: 磁盘快照本身也守 4KB 字节预算（中文不膨胀到 12KB）", () => {
+  const root = project({ note: "中文笔记内容。".repeat(2000) })
+  snapshotWorkingNote(root)
+  const onDisk = readFileSync(join(root, ".vibeweaver", "memory-snapshot.json"))
+  const text = JSON.parse(onDisk.toString("utf8")).text
+  assert.ok(Buffer.byteLength(text, "utf8") <= 4096, `snapshot text ${Buffer.byteLength(text, "utf8")} bytes`)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("B2: 验收判据变了（换任务）→ 旧快照不再被当作权威", () => {
+  const root = project({ note: "# 账本 A\n- 下一动作: 删除旧 login 路由\n" })
+  snapshotWorkingNote(root)
+  rmSync(join(root, "tests", "working_note.md"))
+  assert.ok(snapshotTextOf(root).includes("删除旧 login 路由"), "同一任务内仍可用")
+  writeFileSync(join(root, "tests", "acceptance.md"), "> cap=5  stall=3×\n# 新任务 B\n")
+  assert.equal(snapshotTextOf(root), "", "换任务后旧快照必须失效")
+  assert.ok(!compactStateBundle(root).includes("删除旧 login 路由"), "不得把上一任务的下一步投给新任务")
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("B2: `.vibeweaver` 是项目外符号链接 → 不写也不读", () => {
+  const root = project({ note: "# 账本\n- x\n" })
+  const outside = mkdtempSync(join(tmpdir(), "vwout2-"))
+  rmSync(join(root, ".vibeweaver"), { recursive: true, force: true })
+  symlinkSync(outside, join(root, ".vibeweaver"))
+  snapshotWorkingNote(root)
+  assert.ok(!existsSync(join(outside, "memory-snapshot.json")), "不得写到项目外")
+  assert.equal(snapshotTextOf(root), "", "也不得读项目外的快照")
+  rmSync(root, { recursive: true, force: true })
+  rmSync(outside, { recursive: true, force: true })
 })
 
 test("B3: 首次写入的重入指针按项目根判定（有笔记/有验收两种文案）", () => {
@@ -110,4 +155,6 @@ test("B5: 契约卡含 §V9 收官顺序与 §V12 合法停止", () => {
   assert.match(card, /§V9 收官顺序/)
   assert.match(card, /§V12 合法停止/)
   assert.match(card, /上下文用尽/, "§V12 要写明它不是停止理由")
+  assert.match(card, /含 ❌ 记忆/, "§V12 的 cap-stall 必须带记忆记录子条件（评审合规项）")
+  assert.match(card, /关键仪式不延后/, "§V9 必须保留『关键仪式不延后』")
 })

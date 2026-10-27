@@ -1,7 +1,7 @@
 // vibeweaver-dsh 纯函数核心 — 与 dsh 解耦，可单测
 import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs"
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, readlinkSync, readSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { homedir } from "node:os"
 
@@ -346,7 +346,7 @@ export function stallObservation(root, file) {
       }
     }
     mkdirSync(stateDir, { recursive: true })
-    const tmp = p + ".tmp"
+    const tmp = `${p}.${process.pid}.tmp`
     writeFileSync(tmp, JSON.stringify(st))
     renameSync(tmp, p)
     return msg
@@ -902,7 +902,7 @@ const CODE_SHELL_RE = [
 const CODE_ARGV_RE = g(String.raw`\bsubprocess\s*\.\s*(?:run|call|check_output|check_call|Popen)\s*\(\s*(?<t>[^\]]*)\]`)
 // os.exec* / os.spawn*(mode, prog, [argv]) 的 argv 形态：命令载荷在数组里，首参只是程序名
 // （评审遗留项：`os.execvp("/bin/sh", ["-c", "rm -rf src"])` 曾只被读出 `/bin/sh`）。
-const CODE_OS_EXEC_ARGV_RE = g(String.raw`\bos\s*\.\s*(?:exec|spawn)[a-z]*\s*\(\s*(?:[^,\[\]]*,\s*)?\[(?<a>[^\]]*)\]`)
+const CODE_OS_EXEC_ARGV_RE = g(String.raw`\bos\s*\.\s*(?:exec|spawn|posix_spawn)[a-z]*\s*\([^\[]*\[(?<a>[^\]]*)\]`)
 // node spawn/execFile 的 argv 形态：spawn("rm", ["-rf","src"])（评审 I-3）
 const CODE_NODE_ARGV_RE = g(String.raw`\b(?:spawn|spawnSync|execFile|execFileSync)\s*\(\s*${QG}${TG}${QE}\s*,\s*\[(?<a>[^\]]*)\]`)
 // os.spawnl(os.P_WAIT, "/bin/rm", "-rf", "src")：首参是 mode 标识符，程序名在第二位，
@@ -1076,7 +1076,7 @@ export function scanTexts(text) {
   const out = []
   // 反斜杠续行（评审遗留项）：`rm -rf \\\n src` 在 shell 与 python 里都等价于一行，
   // 先归一化再扫描，否则锚点与参数都会被换行拆开。
-  const whole = String(text || "").replace(/\\\s*\n/g, " ").trim()
+  const whole = String(text || "").replace(/\\\s*\n/g, "").trim()
   if (!whole) return out
   out.push(whole)
   if (!/\n/.test(whole)) return out
@@ -1184,16 +1184,56 @@ const MEMORY_BUNDLE_MAX = 4096
 const MEMORY_STATE_CAP = 500
 const SNAPSHOT_FILE = "memory-snapshot.json"
 
+/** 按 **UTF-8 字节**截断（`String.slice` 数的是字符：中文笔记 4096 字符 ≈ 12KB，评审实证超预算）。 */
+export function capUtf8(text, max) {
+  const s = String(text || "")
+  if (Buffer.byteLength(s, "utf8") <= max) return s
+  // 每个 UTF-16 单元至少 1 字节 → 先按 max 个单元截断，再二分到字节上限内
+  const head = s.slice(0, max)
+  let lo = 0
+  let hi = head.length
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1
+    if (Buffer.byteLength(head.slice(0, mid), "utf8") <= max) lo = mid
+    else hi = mid - 1
+  }
+  return head.slice(0, lo)
+}
+
 export function workingNoteOf(root) {
   const p = path.join(root, "tests", "working_note.md")
   // 符号链接安全：笔记被做成指向项目外的链接时，不读、不快照、不投进模型上下文
   // （快照会落 .vibeweaver/ 并随压缩边界投递，等于把外部文件内容带进会话）。
   try {
     if (!relativeUnderRoot(root, resolveWritePath(p))) return ""
+    const st = statSync(p)
+    if (!st.isFile()) return ""
+    // 超大文件只读头部 1MB：笔记是 ≤50 行的工作记忆，读 30MB 只是浪费（评审实证 18ms/30MB）
+    if (st.size > 1 << 20) {
+      const fd = openSync(p, "r")
+      try {
+        const buf = Buffer.alloc(1 << 20)
+        const n = readSync(fd, buf, 0, buf.length, 0)
+        return buf.subarray(0, n).toString("utf8").replace(/\r\n/g, "\n")
+      } finally {
+        closeSync(fd)
+      }
+    }
+    return safeRead(p).replace(/\r\n/g, "\n")
   } catch {
     return ""
   }
-  return safeRead(p).replace(/\r\n/g, "\n")
+}
+
+/** 快照与"当前任务"的绑定：验收判据变了 = 换任务了，旧快照不得再被当作权威。 */
+function acceptanceFingerprint(root) {
+  const p = path.join(root, "tests", "acceptance.md")
+  try {
+    const st = statSync(p)
+    return `${Math.round(st.mtimeMs)}:${sha256File(p)}`
+  } catch {
+    return ""
+  }
 }
 
 /** 写入时留存（best-effort）：笔记被删/蒸馏后，压缩边界仍有东西可投。 */
@@ -1202,10 +1242,18 @@ export function snapshotWorkingNote(root) {
     const text = workingNoteOf(root)
     if (!text.trim()) return
     const dir = path.join(root, ".vibeweaver")
+    // `.vibeweaver` 也可能是符号链接（评审实证）：落点必须在项目内，否则快照写到项目外
+    if (!relativeUnderRoot(root, resolveWritePath(dir))) return
     const p = path.join(dir, SNAPSHOT_FILE)
     mkdirSync(dir, { recursive: true })
-    const tmp = p + ".tmp"
-    writeFileSync(tmp, JSON.stringify({ rel: "tests/working_note.md", text: text.slice(0, MEMORY_BUNDLE_MAX), t: Date.now() }))
+    // 每进程独立临时文件：多会话并发时同名 .tmp 会被别人 rename 走 → ENOENT 丢更新（评审实证）
+    const tmp = `${p}.${process.pid}.tmp`
+    writeFileSync(tmp, JSON.stringify({
+      rel: "tests/working_note.md",
+      text: capUtf8(text, MEMORY_BUNDLE_MAX),
+      t: Date.now(),
+      acc: acceptanceFingerprint(root),
+    }))
     renameSync(tmp, p)
   } catch {
     /* 快照是 best-effort：文件还在时投递不受影响 */
@@ -1216,8 +1264,13 @@ export function snapshotTextOf(root) {
   try {
     const p = path.join(root, ".vibeweaver", SNAPSHOT_FILE)
     if (!existsSync(p)) return ""
+    // 读侧同样要求落在项目内（`.vibeweaver` 被换成指向项目外的链接时不读）
+    if (!relativeUnderRoot(root, resolveWritePath(p))) return ""
     const d = JSON.parse(safeRead(p) || "null")
-    return typeof (d && d.text) === "string" ? d.text : ""
+    if (!d || typeof d.text !== "string") return ""
+    // 跨任务失效：验收判据在快照之后变过 → 这是上一个任务的账本，不得当作"权威"
+    if (typeof d.acc === "string" && d.acc && d.acc !== acceptanceFingerprint(root)) return ""
+    return capUtf8(d.text, MEMORY_BUNDLE_MAX)
   } catch {
     return ""
   }
@@ -1236,7 +1289,7 @@ export function compactStateBundle(root) {
   if (note && fromSnapshot) {
     return [
       "【vibeweaver 工作状态】harness 快照——tests/working_note.md 已不在盘上，这份副本是权威：",
-      note.slice(0, MEMORY_BUNDLE_MAX - 400),
+      capUtf8(note, MEMORY_BUNDLE_MAX - 400),
       "恢复规则：下一次编辑前先重读 tests/acceptance.md 与 tests/verification_log.md 末尾 20 行。",
     ].join("\n")
   }
@@ -1251,7 +1304,7 @@ export function compactStateBundle(root) {
   }
   return [
     "【vibeweaver 工作状态】机器投递；这份账本是任务状态，优先于被压缩的摘要：",
-    note.slice(0, MEMORY_BUNDLE_MAX - 400),
+    capUtf8(note, MEMORY_BUNDLE_MAX - 400),
     "恢复规则：压缩后先重读 tests/working_note.md、tests/acceptance.md 与日志末尾 20 行，再动手。",
   ].join("\n")
 }
@@ -1281,7 +1334,7 @@ export function recordMemoryDelivery(root, kind) {
     md[kind] = (Number(md[kind]) || 0) + 1
     st.memoryDeliveries = md
     mkdirSync(dir, { recursive: true })
-    const tmp = p + ".tmp"
+    const tmp = `${p}.${process.pid}.tmp`
     writeFileSync(tmp, JSON.stringify(st))
     renameSync(tmp, p)
   } catch {
@@ -1317,8 +1370,8 @@ export function covenantCard(cfg) {
     "- COV-4 SELF-STARTING 验证循环: 运行时行为变化 → 自动 Act→Capture→Verify→Fix→Log。",
     `- COV-5 验证器宣布: 先跑 python3 ${probe} --generate → Read tests/probe_vision.png → --check。PASS → Verifier: model-native [image]（§A4.1.1）；FAIL 且有 mm-sensor → mm-sensor [mode]（vision.py --detail high，禁自读）；都无 → direct read（DOM/日志）。`,
     "- §A4.1.2 拷贝保真: 几何/尺寸/遮挡只由仪器认证（ui_fidelity.py diff/boxes、refboxes、mm_probe --compare-*），VLM 永不认证几何。",
-    "- §V9 收官顺序: 代码+测试绿 → 证据 → 完工输出（记忆/评审包/ADR 事后从日志装配）；压预算先降仪式（[Coverage]/na），不降交付物、不作假。",
-    "- §V12 合法停止: 只有 ALL-PASS / cap-stall / PAUSED 包 / [Coverage] 诚实部分算停；\"上下文用尽\"不是停止理由（须 §V9 预算依据）。",
+    "- §V9 收官顺序: 代码+测试绿 → 证据 → 完工输出（记忆/评审包/ADR 事后）；压预算先降仪式，不降交付物；关键仪式不延后：COV-9 基线/acceptance/PAUSED·ADR/测试。",
+    "- §V12 合法停止: 只有 ALL-PASS / cap-stall（含 ❌ 记忆记录）/ PAUSED 包 / [Coverage] 诚实部分算停；\"上下文用尽\"不是理由（须 §V9 预算依据）。",
     "- COV-6 backend-only → API 文档驱动测试循环（httpx/requests）。",
     "- COV-7 循环边界: iteration cap=5 per sub-problem, stall=3× 同判据连败（acceptance.md 首行 `> cap=5  stall=3×`）。另: ≥4 连续 no-op bash（echo/printf 旁白）= noop-bash stall——中断即 stall 声明，完成前须写 `- stall: noop-bash …` 入 verification_log；旁白≠执行，宣布的调用必须真发出。",
     "- 完成行必须含字面 token: `HARD-GATE-1: NO-TEST-NO-DONE=pass` 与 `HARD-GATE-2: SCRIPT-ONLY=pass`。",
@@ -1345,7 +1398,7 @@ export function covenantCard(cfg) {
     "完整规则: 调用 skill({name:\"vibeweaver\"})。",
     `正源: ${src}`,
     "",
-    "自检: 调 vibeweaver_gate（免 bash）。",
+    "自检: 调 vibeweaver_gate。",
     cfg?.gateMode === "warn"
       ? "本会话 gateMode=warn：门禁仅提示不阻断；急停 VIBEWEAVER_GATE=off 或 /vibe off。"
       : "急停: VIBEWEAVER_GATE=off 或 /vibe off。",

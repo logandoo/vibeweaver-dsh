@@ -257,6 +257,7 @@ test("遗留项: 反斜杠续行先归一化再扫描", () => {
   const root = project()
   assert.ok(decide(root, "bash", { command: "rm -rf \\\n src" }).deny, "rm -rf \\ + 换行 + 目标")
   assert.ok(decide(root, "bash", { command: "rm \\\n -rf src" }).deny, "参数被换行拆开")
+  assert.ok(decide(root, "bash", { command: "rm -\\\nrf src" }).deny, "shell 语义是删除反斜杠+换行（不是换空格）")
   assert.equal(decide(root, "bash", { command: "echo a \\\n b" }).deny, null, "无害续行不误拦")
   rmSync(root, { recursive: true, force: true })
 })
@@ -278,6 +279,8 @@ os.execvp("/bin/sh", ["-c", "rm -rf src"])`, description: "d" }).deny, "命令�
 os.execvp("/bin/sh", ["-c", "${g}"])`, description: "d" }).deny, "argv 里的破坏性命令同判")
   assert.equal(decide(root, "run_code", { code: `import os
 os.execvp("/bin/sh", ["-c", "git status"])`, description: "d" }).deny, null, "无害 argv 不误拦")
+  assert.ok(decide(root, "run_code", { code: `import os\nos.posix_spawn("/bin/sh", ["-c", "rm -rf src"], os.environ)`, description: "d" }).deny, "posix_spawn 形态")
+  assert.ok(decide(root, "run_code", { code: `import os\nos.spawnv(os.P_WAIT, "/bin/sh", ["-c", "rm -rf src"])`, description: "d" }).deny, "spawnv(mode, prog, argv) 形态")
   rmSync(root, { recursive: true, force: true })
 })
 
