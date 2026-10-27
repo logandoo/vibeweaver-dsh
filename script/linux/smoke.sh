@@ -25,7 +25,7 @@ SESSION_ROOT="${DSH_SMOKE_SESSION_ROOT:-$HOME/.dsh/sessions}"
 
 # ── (0) 版本一致性：冒烟钉必须等于 engines.dsh 下限 ──
 RANGE="$(node -p "require('./package.json').engines.dsh")"
-FLOOR="${RANGE#>=}"
+FLOOR="${RANGE#>=}"; FLOOR="${FLOOR%% *}"   # 范围串形如 ">=0.1.0-rc.6 <0.3.0"，下限取第一段
 # 默认跑两端：下限证明向后兼容，`next` 证明当前注册表头版本（两条 BLOCKER 就住在那儿）。
 # 覆盖 DSH_SMOKE_VERSIONS 时必须是显式行为，别再让"钉与闸漂移"悄悄通过（评审 R2）。
 PINS="${DSH_SMOKE_VERSIONS:-$FLOOR next}"

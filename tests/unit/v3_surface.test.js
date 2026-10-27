@@ -244,6 +244,43 @@ test("R1复评: 读模式与同名方法不误拦", () => {
   rmSync(root, { recursive: true, force: true })
 })
 
+// ── 遗留项收口（评审列出的四类已知豁免）────────────────────────────────────
+test("遗留项: /bin/rm 与 /usr/bin/rm 绝对路径形式同样在册", () => {
+  const root = project()
+  assert.ok(decide(root, "bash", { command: "/bin/rm -rf src" }).deny, "/bin/rm 与 rm 是同一个动作")
+  assert.ok(decide(root, "bash", { command: "true && /usr/bin/rm -rf src" }).deny, "复合段里的绝对路径也要认出")
+  assert.equal(decide(root, "bash", { command: "/bin/rm -rf /tmp/vw-scratch" }).deny, null, "白名单目标仍然放行")
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("遗留项: 反斜杠续行先归一化再扫描", () => {
+  const root = project()
+  assert.ok(decide(root, "bash", { command: "rm -rf \\\n src" }).deny, "rm -rf \\ + 换行 + 目标")
+  assert.ok(decide(root, "bash", { command: "rm \\\n -rf src" }).deny, "参数被换行拆开")
+  assert.equal(decide(root, "bash", { command: "echo a \\\n b" }).deny, null, "无害续行不误拦")
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("遗留项: require('rimraf').sync(x) 形态", () => {
+  const root = project()
+  assert.ok(decide(root, "run_code", { code: `require('rimraf').sync('src')`, description: "d" }).deny, "包名与调用被引号隔开也要认出")
+  assert.ok(decide(root, "run_code", { code: `import rimraf from 'rimraf'\nrimraf.sync('src')`, description: "d" }).deny, "import 后的裸调用同样在册")
+  assert.equal(decide(root, "run_code", { code: `require('rimraf').sync('node_modules')`, description: "d" }).deny, null, "白名单目标放行")
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("遗留项: os.exec*/spawn* 的 argv 载荷", () => {
+  const root = project()
+  const g = "git " + "reset --hard"
+  assert.ok(decide(root, "run_code", { code: `import os
+os.execvp("/bin/sh", ["-c", "rm -rf src"])`, description: "d" }).deny, "命令藏在 argv 的 -c 后面")
+  assert.ok(decide(root, "run_code", { code: `import os
+os.execvp("/bin/sh", ["-c", "${g}"])`, description: "d" }).deny, "argv 里的破坏性命令同判")
+  assert.equal(decide(root, "run_code", { code: `import os
+os.execvp("/bin/sh", ["-c", "git status"])`, description: "d" }).deny, null, "无害 argv 不误拦")
+  rmSync(root, { recursive: true, force: true })
+})
+
 test("R1复评: 多行补扫只把『多条命令』当命令，跨行字符串与 heredoc 是数据", () => {
   const root = project()
   const g = "git " + "reset --hard"
