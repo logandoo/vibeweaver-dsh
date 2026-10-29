@@ -272,3 +272,13 @@ MIT
 ## Port note 2026-10-15b
 
 Bidirectional reconciliation with the mainline hardening wave: assert_artifacts merges mainline P0/P1 (fail-closed JSON, C1 derived class, C2 media validation, seal manifest, per-block COV-9) with this side's hardening (first-entry class, _unquote_git, per-asset binding, exec verdict); lib.js ports D4 fail-closed (BLOCKING_HINTS retired); card wording E2' + <8KB held; unit 69/69, assert --existing --final 40/40.
+
+## Port record 2026-10-29 (W19–W22 contract deltas)
+
+assert_artifacts synced to mainline W19–W22: graded gate (staged_check — completion
+conditions advisory during execution, enforced at `--final`) · secret baseline
+(record_secret_debt, read-from-committed anti-laundering) · group 23 dead-end
+re-validation (anti-drilling) · group 24 hypothesis ledger / approach-review.
+lib.js covenant card ports group 23 (COV-7 noop-bash wording tightened to keep the
+<8KB budget); root-stall is enforced via the assert side. Unit suite 176/176, all
+four card configs < 8000B.

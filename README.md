@@ -270,3 +270,7 @@ MIT
 ## 移植记录 2026-10-15b
 
 主线硬化波双向对账：assert_artifacts 合并主线 P0/P1（fail-closed JSON/C1 派生类/C2 媒体校验/封册/按块 COV-9）与本侧硬化（首条类解析、_unquote_git、逐资产绑定、exec 判决）；lib.js 移植 D4 fail-closed（BLOCKING_HINTS 退役）；卡片 E2' 措辞 + <8KB 保持；单测 69/69，assert --existing --final 40/40。
+
+## 移植记录 2026-10-29（W19–W22 契约增量）
+
+assert_artifacts 同步主线 W19–W22：分级门禁（staged_check，完成条件执行期 advisory + `--final` 强制）· secret baseline（record_secret_debt，read-from-committed 反洗白）· group 23 死胡同再验证（anti-钻牛角尖）· group 24 假设台账/approach-review。lib.js 契约卡移植 group 23（COV-7 noop-bash 措辞精简以保 <8KB 预算）；root-stall 由 assert 强制侧闭环。单测 176/176，契约卡四配置 <8000B。
